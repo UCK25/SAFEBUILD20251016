@@ -1,0 +1,8 @@
+ultralytics>=8.3.200
+PyQt5>=5.15.10
+opencv-python==4.10.0.84
+numpy>=1.26.4
+Pillow>=10.4.0
+roboflow>=1.1.24 
+pyzbar>=0.1.9
+# Para descarga inicial del dataset (opcional si ya lo tiene)

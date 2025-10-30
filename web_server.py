@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, Request, HTTPException
-from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import io, os, cv2, numpy as np, time, json
@@ -164,11 +164,8 @@ def detect_and_annotate(image_np):
 
 @app.get('/')
 async def index():
-    # Serve simple HTML
-    html_path = os.path.join(static_dir, 'index.html')
-    if os.path.exists(html_path):
-        return HTMLResponse(open(html_path, 'r', encoding='utf-8').read())
-    return HTMLResponse('<html><body><h1>SafeBuild Web Detector</h1></body></html>')
+    # Root should redirect to the dashboard page. Keep index.html removable.
+    return RedirectResponse('/dashboard')
 
 
 @app.get('/dashboard')

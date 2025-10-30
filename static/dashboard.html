@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SafeBuild - Dashboard Web</title>
+  <style>
+    body { background:#071023; color:#e6eef8; font-family:Arial, sans-serif; }
+    .container { max-width:1100px; margin:16px auto; }
+    table { width:100%; border-collapse:collapse; margin-top:8px }
+    th, td { padding:8px; border-bottom:1px solid #123; text-align:left }
+    th { background:#091428 }
+    button { padding:6px 10px; margin-right:6px }
+    .top { display:flex; gap:8px; align-items:center }
+    a { color:#8fbfff }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Modals -->
+    <div id="modalOverlay" class="modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:40"></div>
+
+    <div id="authModal" class="modal" style="display:none; position:fixed; z-index:50; left:50%; top:50%; transform:translate(-50%,-50%); background:#071827; color:#e6eef8; padding:18px; border:1px solid #234; width:420px; box-shadow:0 6px 20px rgba(0,0,0,0.6)">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px"><strong>Autenticar</strong><button id="closeAuth" style="background:transparent;border:0;color:#a8d0ff">✕</button></div>
+      <div style="display:flex; flex-direction:column; gap:8px">
+        <input id="modal_user" placeholder="usuario" style="padding:8px" />
+        <input id="modal_pass" placeholder="contraseña" type="password" style="padding:8px" />
+        <div style="display:flex; gap:8px; justify-content:flex-end">
+          <button id="modalLoginBtn">Login</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="manageModal" class="modal" style="display:none; position:fixed; z-index:50; left:50%; top:50%; transform:translate(-50%,-50%); background:#071827; color:#e6eef8; padding:18px; border:1px solid #234; width:820px; max-height:80vh; overflow:auto; box-shadow:0 6px 20px rgba(0,0,0,0.6)">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px"><strong>Gestionar Usuarios</strong><button id="closeManage" style="background:transparent;border:0;color:#a8d0ff">✕</button></div>
+      <div id="manageContent">
+        <p>Cargando usuarios...</p>
+      </div>
+    </div>
+
+    <div id="reportModal" class="modal" style="display:none; position:fixed; z-index:50; left:50%; top:50%; transform:translate(-50%,-50%); background:#071827; color:#e6eef8; padding:18px; border:1px solid #234; width:420px; box-shadow:0 6px 20px rgba(0,0,0,0.6)">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px"><strong>Generar Reporte</strong><button id="closeReport" style="background:transparent;border:0;color:#a8d0ff">✕</button></div>
+      <div style="display:flex; flex-direction:column; gap:8px">
+        <label>Desde: <input id="rep_from" type="date" /></label>
+        <label>Hasta: <input id="rep_to" type="date" /></label>
+        <label>Formato:
+          <select id="rep_format"><option value="csv">CSV</option><option value="xlsx">XLSX</option><option value="pdf">PDF</option></select>
+        </label>
+        <div style="display:flex; gap:8px; justify-content:flex-end"><button id="genReportBtn">Generar</button></div>
+      </div>
+    </div>
+    <div class="top">
+      <h1>Dashboard — SafeBuild</h1>
+        <div style="margin-left:auto; display:flex; gap:12px; align-items:center">
+        <div id="currentUserDisplay" style="font-size:0.95em; color:#bfe">No autenticado</div>
+        <button id="logoutBtn" disabled>Logout</button>
+        <button id="refreshBtn">Refrescar</button>
+      </div>
+    </div>
+
+      <h3>Visor y eventos recientes</h3>
+      <div class="layout" style="display:flex; gap:12px; align-items:flex-start;">
+        <div style="flex:1 1 60%;">
+          <h4>Visor</h4>
+          <div id="videoContainer" style="position:relative; width:100%; height:760px; background:#000; border:1px solid #123;">
+            <video id="dash_video" autoplay playsinline muted style="width:100%; height:100%; object-fit:cover; display:block;"></video>
+            <canvas id="overlayCanvas" style="position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none;"></canvas>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:8px;">
+            <button id="authBtnDash">Autenticar</button>
+            <button id="manageBtnDash">Gestionar Usuarios</button>
+            <button id="reportBtnDash">Generar Reporte</button>
+          </div>
+        </div>
+        <div style="flex:1 1 40%; max-width:420px;">
+    <h4>QR Escaneados</h4>
+      <div id="qrScans" style="background:#051122; padding:8px; border:1px solid #123; max-height:120px; overflow:auto; font-size:0.9em; margin-bottom:8px;"></div>
+    <h4>Incidentes</h4>
+      <div id="incidentsLog" style="background:#051122; padding:8px; border:1px solid #123; max-height:520px; overflow:auto; font-size:0.9em;"></div>
+        </div>
+      </div>
+
+    <h3 style="margin-top:18px">Usuarios</h3>
+    <table id="usersTable">
+      <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>QR</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <p style="margin-top:18px; font-size:0.9em; color:#99a">Notas: Este dashboard es una interfaz mínima para revisión y generación de reportes. Para producción se recomienda añadir autenticación y HTTPS (Render lo proporciona).</p>
+  </div>
+
+<script>
+let currentUser = null;
+
+document.getElementById('logoutBtn').addEventListener('click', async ()=>{
+  try{
+    // Ask server to clear session cookie
+    await fetch('/api/logout', { method: 'POST' });
+  }catch(e){ /* ignore */ }
+  // clear client state
+  currentUser = null;
+  const logoutBtn = document.getElementById('logoutBtn'); if(logoutBtn) logoutBtn.disabled = true;
+  const disp = document.getElementById('currentUserDisplay'); if(disp) disp.textContent = 'No autenticado';
+  fetchIncidents(); fetchUsers();
+});
+async function fetchIncidents(){
+  // Render incidents as a simple live log (newest first), similar to QR Escaneados
+  const res = await fetch('/api/incidents');
+  const data = await res.json();
+  const log = document.getElementById('incidentsLog');
+  log.innerHTML = '';
+  if(!data || !data.length){
+    log.innerHTML = '<div style="padding:8px;color:#9ab;">No hay incidentes recientes.</div>';
+    return;
+  }
+  // Render newest first, simple entries
+  data.sort((a,b)=>{ try{ return new Date(b.timestamp) - new Date(a.timestamp); }catch(e){ return 0; } });
+  data.forEach(i => {
+    const d = document.createElement('div'); d.style.padding='8px'; d.style.borderBottom='1px solid #123';
+    const header = document.createElement('div'); header.style.fontWeight='600'; header.style.marginBottom='4px';
+    header.textContent = `${i.type || 'Incidente'} — ${i.camera_name || ''} ${i.timestamp || ''}`;
+    const detail = document.createElement('div'); detail.style.color='#bcd'; detail.style.fontSize='0.9em';
+  const who = i.user_identified ? `Usuario: ${i.user_identified}` : (i.description || `Usuario: ${i.user_identified || 'unknown'}`);
+  detail.textContent = who;
+    d.appendChild(header); d.appendChild(detail);
+    log.appendChild(d);
+  });
+}
+
+async function fetchUsers(){
+  const res = await fetch('/api/users');
+  const data = await res.json();
+  const tbody = document.querySelector('#usersTable tbody');
+  tbody.innerHTML = '';
+  if(!currentUser){
+    const tr = document.createElement('tr'); tr.innerHTML = `<td colspan="4">Autenticar para ver usuarios.</td>`; tbody.appendChild(tr); return;
+  }
+  // admins and supervisors see all users; others see only their own
+  const allowed = ['admin','supervisor'];
+  let visible = data;
+  if(!allowed.includes(currentUser.role)){
+    visible = data.filter(u => u.username === currentUser.username);
+  }
+  visible.forEach(u=>{
+    const tr = document.createElement('tr');
+    const qrText = '********';
+    tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>${qrText}</td>`;
+    const btnTd = document.createElement('td');
+    const dl = document.createElement('button');
+    dl.textContent = 'Descargar QR';
+    dl.onclick = async ()=>{
+      try{
+        const resp = await fetch(`/api/download_qr/${u.id}`);
+        if(!resp.ok){ alert('No permitido o error'); return; }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove();
+      }catch(e){ alert('Error: '+e.message) }
+    };
+    btnTd.appendChild(dl);
+    tr.appendChild(btnTd);
+    tbody.appendChild(tr);
+  });
+}
+
+document.getElementById('refreshBtn').addEventListener('click', ()=>{ fetchIncidents(); fetchUsers(); });
+
+  // report buttons removed from header; use report modal instead
+
+// dashboard embedded buttons -> open modals
+const authBtnDash = document.getElementById('authBtnDash');
+const manageBtnDash = document.getElementById('manageBtnDash');
+const reportBtnDash = document.getElementById('reportBtnDash');
+const overlay = document.getElementById('modalOverlay');
+function openModal(id){ const el = document.getElementById(id); if(!el) return; if(overlay) overlay.style.display='block'; el.style.display='block'; }
+function closeModal(id){ const el = document.getElementById(id); if(!el) return; el.style.display='none'; if(overlay) overlay.style.display='none'; }
+
+if(authBtnDash) authBtnDash.addEventListener('click', ()=>{ openModal('authModal'); const mu = document.getElementById('modal_user'); if(mu) mu.focus(); });
+if(manageBtnDash) manageBtnDash.addEventListener('click', async ()=>{ window.location='/manage'; });
+if(reportBtnDash) reportBtnDash.addEventListener('click', ()=>{ openModal('reportModal'); });
+
+const closeAuth = document.getElementById('closeAuth'); if(closeAuth) closeAuth.addEventListener('click', ()=> closeModal('authModal'));
+const closeManage = document.getElementById('closeManage'); if(closeManage) closeManage.addEventListener('click', ()=> closeModal('manageModal'));
+const closeReport = document.getElementById('closeReport'); if(closeReport) closeReport.addEventListener('click', ()=> closeModal('reportModal'));
+if(overlay) overlay.addEventListener('click', ()=>{ // clicking overlay closes modals
+  ['authModal','manageModal','reportModal'].forEach(id=>{ const e=document.getElementById(id); if(e) e.style.display='none'; });
+  overlay.style.display='none';
+});
+
+// modal login button
+const modalLoginBtn = document.getElementById('modalLoginBtn');
+if(modalLoginBtn){
+  modalLoginBtn.addEventListener('click', async ()=>{
+    const uel = document.getElementById('modal_user'); const pel = document.getElementById('modal_pass');
+    const u = uel? uel.value : null; const p = pel? pel.value : null;
+    if(!u || !p) return alert('Usuario y contraseña requeridos');
+    const res = await fetch('/api/login', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({username:u, password:p}) });
+    if(!res.ok) return alert('Login falló');
+    const data = await res.json();
+    if(data.ok){ 
+      currentUser = data.user; 
+      const disp = document.getElementById('currentUserDisplay'); if(disp) disp.textContent = `${currentUser.username} (${currentUser.role})`;
+      const logoutBtn = document.getElementById('logoutBtn'); if(logoutBtn) logoutBtn.disabled = false;
+      alert('Login OK'); 
+      closeModal('authModal'); 
+      fetchIncidents(); fetchUsers(); 
+    }
+    else alert('Credenciales inválidas');
+  });
+}
+
+// report modal generate
+const genReportBtn = document.getElementById('genReportBtn');
+if(genReportBtn){
+  genReportBtn.addEventListener('click', ()=>{
+    const fromEl = document.getElementById('rep_from'); const toEl = document.getElementById('rep_to'); const fmtEl = document.getElementById('rep_format');
+    const from = fromEl? fromEl.value : '';
+    const to = toEl? toEl.value : '';
+    const fmt = fmtEl? fmtEl.value : 'csv';
+    let url = '/report/' + fmt;
+    const params = new URLSearchParams(); if(from) params.set('from', from); if(to) params.set('to', to);
+    if(Array.from(params).length) url += '?' + params.toString();
+    window.open(url, '_blank');
+    closeModal('reportModal');
+  });
+}
+
+// Manage users modal loader
+async function loadManageUsers(){
+  const el = document.getElementById('manageContent'); el.innerHTML = '<p>Cargando usuarios...</p>';
+  const res = await fetch('/api/users');
+  if(!res.ok){ el.innerHTML = '<p>No autorizado o error al recuperar usuarios</p>'; return; }
+  const users = await res.json();
+  renderManageUsers(users);
+}
+
+function renderManageUsers(users){
+  const el = document.getElementById('manageContent'); el.innerHTML = '';
+  if(!currentUser){ el.innerHTML = '<p>Autenticar para ver o gestionar usuarios.</p>'; return; }
+  // if not admin/supervisor, only show own info
+  const allowedRoles = ['admin','supervisor'];
+  let visible = users;
+  if(!allowedRoles.includes(currentUser.role)){
+    visible = users.filter(u=> u.username === currentUser.username);
+  }
+  const table = document.createElement('table'); table.style.width='100%'; table.style.borderCollapse='collapse';
+  const thead = document.createElement('thead'); thead.innerHTML = '<tr><th>ID</th><th>Username</th><th>Role</th><th>QR</th><th>Acciones</th></tr>';
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  visible.forEach(u=>{
+    const tr = document.createElement('tr'); tr.style.borderBottom='1px solid #123';
+    const tdActions = document.createElement('td'); tdActions.style.padding='6px';
+    const dl = document.createElement('button'); dl.textContent='Descargar QR'; dl.onclick = async ()=>{
+      try{ const resp = await fetch(`/api/download_qr/${u.id}`); if(!resp.ok){ alert('No permitido o error'); return; } const blob = await resp.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download=`${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove(); }catch(e){ alert('Error: '+e.message) }
+    };
+    tdActions.appendChild(dl);
+    // edit button for admins
+    if(['admin','supervisor'].includes(currentUser.role)){
+      const edit = document.createElement('button'); edit.textContent='Editar'; edit.style.marginLeft='8px';
+      edit.onclick = ()=>{ simpleEditUser(u); };
+      tdActions.appendChild(edit);
+    }
+    tr.innerHTML = `<td style="padding:6px">${u.id}</td><td style="padding:6px">${u.username}</td><td style="padding:6px">${u.role}</td><td style="padding:6px">${u.qr_code?u.qr_code:''}</td>`;
+    tr.appendChild(tdActions);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  el.appendChild(table);
+}
+
+async function simpleEditUser(u){
+  const newName = prompt('Nuevo username', u.username);
+  if(newName===null) return;
+  const newRole = prompt('Nuevo role (admin|supervisor|guest)', u.role);
+  if(newRole===null) return;
+  try{
+    const res = await fetch('/api/users', { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify({id:u.id, username:newName, role:newRole}) });
+    if(!res.ok) return alert('Error al actualizar');
+    alert('Actualizado'); loadManageUsers(); fetchUsers();
+  }catch(e){ alert('Error: '+e.message) }
+}
+
+// initial load: check server session so navigating back doesn't drop the user
+async function initialLoad(){
+  try{
+    const me = await fetch('/api/me');
+    if(me.ok){ const jd = await me.json(); if(jd.ok){ currentUser = jd.user; const disp = document.getElementById('currentUserDisplay'); if(disp) disp.textContent = `${currentUser.username} (${currentUser.role})`; const logoutBtn = document.getElementById('logoutBtn'); if(logoutBtn) logoutBtn.disabled = false; } }
+  }catch(e){ /* ignore */ }
+  fetchIncidents(); fetchUsers();
+}
+initialLoad();
+
+// --- Dashboard camera + overlay logic (single live view, draw boxes from /detect_json) ---
+let dashStream = null;
+let dashCaptureCanvas = null;
+let dashCaptureCtx = null;
+let overlayCanvas = document.getElementById('overlayCanvas');
+let overlayCtx = overlayCanvas ? overlayCanvas.getContext('2d') : null;
+let dashInterval = null;
+// latest state holders
+let latestDetections = [];
+let latestQREntry = null;
+let lastQSeenTs = 0;
+
+async function startDashCamera(){
+  try{
+    dashStream = await navigator.mediaDevices.getUserMedia({ video: { width:1280, height:720 }, audio: false });
+    const video = document.getElementById('dash_video');
+    video.srcObject = dashStream;
+    // create offscreen capture canvas
+    dashCaptureCanvas = document.createElement('canvas');
+    dashCaptureCanvas.width = 1280; dashCaptureCanvas.height = 720;
+    dashCaptureCtx = dashCaptureCanvas.getContext('2d');
+    // set overlay internal size to match capture size
+    if(overlayCanvas){ overlayCanvas.width = dashCaptureCanvas.width; overlayCanvas.height = dashCaptureCanvas.height; overlayCtx = overlayCanvas.getContext('2d'); }
+
+    // polling detect_json
+    dashInterval = setInterval(async ()=>{
+      try{
+        dashCaptureCtx.drawImage(video, 0, 0, dashCaptureCanvas.width, dashCaptureCanvas.height);
+        const blob = await new Promise(res => dashCaptureCanvas.toBlob(res, 'image/jpeg', 0.7));
+        if(!blob) return;
+        const form = new FormData(); form.append('frame', blob, 'frame.jpg');
+        const r = await fetch('/detect_json', { method:'POST', body: form });
+        if(!r.ok) return;
+        const j = await r.json();
+        if(j && j.ok){ 
+          drawBoxes(j.boxes);
+          // if server found a QR in this frame, immediately show it and add to small UI log
+              if(j.qr){
+            try{
+              latestQREntry = j.qr;
+              lastQSeenTs = Date.now();
+              const el = document.getElementById('qrScans');
+              if(el){ const entry = j.qr; const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; const who = entry.user || entry.qr || '(sin texto)'; d.textContent = `${entry.ts} — ${who}`; el.insertBefore(d, el.firstChild); while(el.childNodes.length > 10) el.removeChild(el.lastChild); }
+              renderOverlay();
+            }catch(e){ console.warn('apply qr immediate', e); }
+          } else {
+            // No QR in this frame: clear transient QR overlay immediately to avoid sticking boxes
+            latestQREntry = null;
+            renderOverlay();
+          }
+        }
+      }catch(e){ console.warn('detect_json error', e); }
+    }, 300);
+  }catch(e){ console.warn('startDashCamera failed', e); }
+}
+
+function stopDashCamera(){
+  if(dashInterval) clearInterval(dashInterval); dashInterval = null;
+  if(dashStream){ dashStream.getTracks().forEach(t=>t.stop()); dashStream=null; }
+}
+
+function drawBoxes(boxes){
+  // store latest detections and re-render overlay
+  latestDetections = boxes || [];
+  renderOverlay();
+}
+
+function renderOverlay(){
+  if(!overlayCtx) return;
+  overlayCtx.clearRect(0,0,overlayCanvas.width, overlayCanvas.height);
+  // draw PPE detections
+  if(Array.isArray(latestDetections)){
+    latestDetections.forEach(b=>{
+      try{
+        const x1 = Math.max(0, b.x1), y1 = Math.max(0, b.y1), x2 = Math.min(overlayCanvas.width, b.x2), y2 = Math.min(overlayCanvas.height, b.y2);
+        const w = x2 - x1, h = y2 - y1;
+        if(w < 30 || h < 30) return;
+        const label = b.label || '';
+        const isMissing = label && label.includes('sin');
+        const color = isMissing ? 'rgba(255,0,0,0.95)' : 'rgba(0,255,0,0.95)';
+        const baseLine = Math.max(3, Math.floor(overlayCanvas.width / 250));
+        overlayCtx.strokeStyle = color; overlayCtx.lineWidth = isMissing ? Math.max(4, Math.floor(baseLine * 1.8)) : baseLine;
+        overlayCtx.strokeRect(x1, y1, w, h);
+        overlayCtx.fillStyle = color; overlayCtx.font = Math.max(12, Math.floor(overlayCanvas.width / 80)) + 'px Arial';
+        overlayCtx.fillText(label, x1 + 6, Math.max(18, y1 + 20));
+      }catch(e){ /* ignore individual draw errors */ }
+    });
+  }
+  // draw QR overlay if present (green rectangle)
+  if(latestQREntry && latestQREntry.points && latestQREntry.image_w && latestQREntry.image_h){
+    try{
+      const p = latestQREntry.points; // array of [x,y]
+      const imgW = latestQREntry.image_w, imgH = latestQREntry.image_h;
+      if(!imgW || !imgH) return;
+      const scaleX = overlayCanvas.width / imgW;
+      const scaleY = overlayCanvas.height / imgH;
+      // compute bounding box from points
+      let xs = p.map(pt=>pt[0]); let ys = p.map(pt=>pt[1]);
+      const x1 = Math.max(0, Math.min(...xs) * scaleX);
+      const y1 = Math.max(0, Math.min(...ys) * scaleY);
+      const x2 = Math.min(overlayCanvas.width, Math.max(...xs) * scaleX);
+      const y2 = Math.min(overlayCanvas.height, Math.max(...ys) * scaleY);
+      const w = x2 - x1, h = y2 - y1;
+      if(w > 8 && h > 8){
+        overlayCtx.strokeStyle = 'rgba(0,200,80,0.95)';
+        overlayCtx.lineWidth = Math.max(4, Math.floor(overlayCanvas.width/220));
+        overlayCtx.strokeRect(x1, y1, w, h);
+        overlayCtx.fillStyle = 'rgba(0,200,80,0.95)';
+        overlayCtx.font = Math.max(12, Math.floor(overlayCanvas.width/90)) + 'px Arial';
+        const who = (latestQREntry.user || latestQREntry.qr) ? (latestQREntry.user || latestQREntry.qr) : '';
+        overlayCtx.fillText('User: '+ who, x1 + 6, Math.max(18, y1 + 18));
+      }
+    }catch(e){ console.warn('QR overlay draw error', e); }
+  }
+}
+
+// start camera when dashboard loads
+window.addEventListener('load', ()=>{ startDashCamera().catch(()=>{}); });
+
+// Poll server for latest QR scan and update small QR log + overlay
+let lastQRTs = null;
+async function pollLastQR(){
+  try{
+    const r = await fetch('/api/last_qr');
+    if(!r.ok) return;
+    const j = await r.json();
+        if(j && j.ok && j.entry){
+      const entry = j.entry;
+      if(entry.ts !== lastQRTs){
+        lastQRTs = entry.ts;
+        latestQREntry = entry;
+        // add to small UI list (show user if available)
+        const el = document.getElementById('qrScans');
+        if(el){
+              const who = entry.user || entry.qr || '(sin texto)';
+              const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; d.textContent = `${entry.ts} — ${who}`;
+          el.insertBefore(d, el.firstChild);
+          // keep max 10
+          while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+        }
+        // re-render overlay to show QR rectangle
+        renderOverlay();
+      }
+    }
+  }catch(e){ /* ignore */ }
+}
+setInterval(pollLastQR, 2000);
+pollLastQR();
+// Poll latest incidents and prepend to incidentsLog when new
+let lastIncidentTs = null;
+async function pollLastIncidents(){
+  try{
+    const r = await fetch('/api/last_incidents');
+    if(!r.ok) return;
+    const j = await r.json();
+    if(j && j.ok && j.entry){
+      const entry = j.entry;
+      if(entry.ts !== lastIncidentTs){
+        lastIncidentTs = entry.ts;
+        const el = document.getElementById('incidentsLog');
+        if(el){
+          const d = document.createElement('div'); d.style.padding='8px'; d.style.borderBottom='1px solid #123';
+          const hdr = document.createElement('div'); hdr.style.fontWeight='600'; hdr.textContent = entry.summary || (entry.ts + ' — Incidente');
+          const det = document.createElement('div'); det.style.color='#bcd'; det.style.fontSize='0.9em'; det.textContent = entry.detail || ((entry.type || 'Incidente') + ' - Usuario: ' + (entry.user_identified || entry.user || 'unknown'));
+          d.appendChild(hdr); d.appendChild(det);
+          el.insertBefore(d, el.firstChild);
+          // keep history reasonable
+          while(el.childNodes.length > 50) el.removeChild(el.lastChild);
+        }
+      }
+    }
+  }catch(e){ /* ignore */ }
+}
+setInterval(pollLastIncidents, 2000);
+pollLastIncidents();
+
+</script>
+</body>
+</html>

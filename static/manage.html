@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SafeBuild - Gestionar Usuarios</title>
+  <style>
+    body { background:#071023; color:#e6eef8; font-family:Arial, sans-serif; }
+    .container { max-width:1100px; margin:16px auto; }
+    table { width:100%; border-collapse:collapse; margin-top:8px }
+    th, td { padding:8px; border-bottom:1px solid #123; text-align:left }
+    th { background:#091428 }
+    button { padding:6px 10px; margin-right:6px }
+    .top { display:flex; gap:8px; align-items:center }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="top">
+      <h1>Gestionar Usuarios</h1>
+      <div style="margin-left:auto">
+        <button id="backBtn">Volver</button>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:12px; align-items:flex-start;">
+      <div style="flex:1">
+        <h3>Usuarios</h3>
+        <table id="usersTable">
+          <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>QR</th><th>Acciones</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+let currentUser = null;
+document.getElementById('backBtn').addEventListener('click', ()=>{ window.location='/dashboard'; });
+
+async function fetchUsers(){
+  const res = await fetch('/api/users');
+  if(!res.ok) return alert('No autorizado');
+  const data = await res.json();
+  const tbody = document.querySelector('#usersTable tbody'); tbody.innerHTML='';
+  data.forEach(u=>{
+    const tr = document.createElement('tr');
+    const masked = '********';
+    tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>${masked}</td>`;
+    const actions = document.createElement('td');
+    const dl = document.createElement('button'); dl.textContent='Descargar QR'; dl.onclick = async ()=>{ try{ const resp = await fetch(`/api/download_qr/${u.id}`); if(!resp.ok) return alert('No permitido'); const blob = await resp.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download=`${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove(); }catch(e){ alert(e.message) } };
+    actions.appendChild(dl);
+    // edit username if permissions
+    if(['admin','supervisor'].includes((currentUser||{}).role)){
+      const edit = document.createElement('button'); edit.textContent='Editar'; edit.onclick = ()=>{ editUser(u); };
+      actions.appendChild(edit);
+    }
+    tr.appendChild(actions);
+  tbody.appendChild(tr);
+  });
+}
+
+function editUser(u){
+  const newName = prompt('Nuevo username', u.username); if(newName===null) return;
+  fetch('/api/users/'+u.id, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify({username:newName, qr_code:u.qr_code}) }).then(r=>{ if(!r.ok) alert('Error'); else { alert('Actualizado'); fetchUsers(); } });
+}
+
+// QR / mapping UI removed: this functionality is internal and intentionally not exposed in the Gestionar UI.
+
+// init
+async function init(){
+  try{
+    const me = await fetch('/api/me');
+    if(me.ok){ const jd = await me.json(); if(jd.ok) currentUser = jd.user; }
+  }catch(e){ /* ignore */ }
+  fetchUsers();
+}
+init();
+</script>
+</body>
+</html>

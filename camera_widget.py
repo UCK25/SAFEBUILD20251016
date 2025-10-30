@@ -29,7 +29,7 @@ class CameraWidget(QWidget):
     _available_indices = None
     _next_index_idx = 0
 
-    def __init__(self, title, camera_index=None, subject: SafetyMonitorSubject = None, log_widget=None, ranking_counter=None):
+    def __init__(self, title, camera_index=None, subject=None, log_widget=None, ranking_counter=None):
         super().__init__()
         self.title = title
         self.camera_index = camera_index
@@ -90,17 +90,17 @@ class CameraWidget(QWidget):
         """Configura los elementos de la interfaz de usuario."""
         self.label = QLabel()
         self.label.setStyleSheet("background-color: black; color: white;")
-        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setScaledContents(True)
         self.label.setMinimumSize(320, 240)
 
         self.titleLabel = QLabel(self.title)
-        self.titleLabel.setAlignment(Qt.AlignCenter)
+        self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.titleLabel.setFont(QFont("Arial", 14, QFont.Bold))
         self.titleLabel.setStyleSheet("color: white; background-color: #444; padding: 5px;")
 
         self.alertaTimerLabel = QLabel()
-        self.alertaTimerLabel.setAlignment(Qt.AlignCenter)
+        self.alertaTimerLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.alertaTimerLabel.setStyleSheet("color: #FFA500; font-size: 10pt;")
 
         layout = QVBoxLayout()
@@ -175,7 +175,6 @@ class CameraWidget(QWidget):
         self.show_no_signal()
 
     def detect_qr_codes(self, frame):
-        """Detecta códigos QR en el frame y retorna información de usuarios."""
         detected_users = []
         try:
             # Detectar QR solo si pyzbar está disponible
@@ -192,52 +191,82 @@ class CameraWidget(QWidget):
             for obj in detected_objects:
                 qr_data = obj.data.decode('utf-8')
                 current_time = time.time()
-                
+
                 # Verificar cooldown para este QR
                 if qr_data in self.last_qr_detection:
                     if current_time - self.last_qr_detection[qr_data] < self.qr_cooldown:
                         continue
-                
+
                 self.last_qr_detection[qr_data] = current_time
-                
+
                 # Buscar usuario en la base de datos
                 user = get_user_by_qr(qr_data)
+                user_info = qr_data
                 if user:
                     user_info = f"{user[1]} ({user[2]})"
-                    detected_users.append(user_info)
-                    
-                    # Dibujar rectángulo alrededor del QR (manejo robusto de puntos)
-                    points = getattr(obj, 'polygon', None)
-                    if points and len(points) > 4:
+
+                # Obtener bounding box/centro para emparejar luego
+                rect = getattr(obj, 'rect', None)
+                cx = cy = None
+                x = y = w = h = None
+                if rect:
+                    try:
+                        x, y, w, h = rect
+                        cx = int(x + w / 2)
+                        cy = int(y + h / 2)
+                        # Dibujar rect
                         try:
-                            pts = np.array([[p.x, p.y] for p in points], dtype=np.int32)
-                            hull = cv2.convexHull(pts)
-                            cv2.polylines(frame, [hull], True, (0, 255, 0), 2)
+                            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
                         except Exception:
                             pass
-                    else:
-                        rect = getattr(obj, 'rect', None)
-                        if rect:
-                            try:
-                                x, y, w, h = rect
-                                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                            except Exception:
-                                pass
-                    
-                    # Mostrar información del usuario (si existen coordenadas)
-                    try:
-                        cv2.putText(frame, user_info, (x, max(20, y - 10)), 
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                     except Exception:
-                        # Si por alguna razón no tenemos coords, no fallar
+                        x = y = w = h = None
+
+                # polygon fallback
+                if (cx is None or cy is None) and hasattr(obj, 'polygon'):
+                    try:
+                        pts = np.array([[p.x, p.y] for p in obj.polygon], dtype=np.int32)
+                        M = cv2.moments(pts)
+                        if M['m00'] != 0:
+                            cx = int(M['m10'] / M['m00'])
+                            cy = int(M['m01'] / M['m00'])
+                    except Exception:
                         pass
-                    
+
+                detected_users.append((user_info, cx, cy, (x, y, w, h) if rect else None))
+
+                # Mostrar información del usuario si tenemos coords
+                try:
+                    if cx is not None and cy is not None:
+                        cv2.putText(frame, user_info, (max(5, cx - 50), max(20, cy - 10)),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                except Exception:
+                    pass
+
+                # En vez de escribir directamente al widget (causa ruido), enviar un evento INFO
+                # al Subject para que el AlertLogger lo procese y aplique deduplicación.
+                try:
+                    if self.subject:
+                        ev = {
+                            'alert_type': '',
+                            'camera': self.title,
+                            'severity': 0,
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'user_identified': user_info,
+                            'description': f'QR detectado - {user_info}',
+                            'evidence_path': None,
+                            'classes_detected': []
+                        }
+                        # notify will dedupe identical INFO events
+                        self.subject.notify(ev)
+                except Exception:
+                    # Fallback: si falla Subject, mantener la escritura directa para compatibilidad
                     if self.log_widget:
                         self.log_widget.append(f"<span style='color: cyan;'>[QR] {self.title}: Usuario identificado - {user_info}</span>")
-        
+
         except Exception as e:
             logging.error(f"Error en detección QR {self.title}: {str(e)}")
-        
+
         return detected_users, frame
 
     def update_frame(self):
@@ -252,9 +281,8 @@ class CameraWidget(QWidget):
             return
 
         try:
-            # Detectar códigos QR
-            detected_users, frame = self.detect_qr_codes(frame)
-            user_identified = ", ".join(detected_users) if detected_users else None
+            # Detectar códigos QR (retorna lista de (user_info, cx, cy, rect))
+            qr_map_by_pos, frame = self.detect_qr_codes(frame)
 
             # Procesar con YOLO si tiene modelo (manejo de errores)
             annotated_frame = frame
@@ -270,35 +298,140 @@ class CameraWidget(QWidget):
                             except Exception:
                                 annotated_frame = frame
 
-                        # Extraer clases detectadas de forma segura
+                        # Extraer cajas y clases y agrupar por persona (clustering simple)
                         try:
                             boxes = getattr(res0, 'boxes', None)
-                            if boxes is not None and hasattr(boxes, 'cls'):
-                                clase_ids = boxes.cls
-                                clases_detectadas = [res0.names[int(c)] for c in clase_ids]
-                        except Exception:
                             clases_detectadas = []
+                            persons = {}
 
-                        # Notificar eventos de seguridad
-                        if self.subject and clases_detectadas:
-                            # Check for missing EPP: no helmet or no vest/reflective
-                            missing_helmet = 'helmet' not in clases_detectadas
-                            missing_vest = not (('reflective' in clases_detectadas) or ('vest' in clases_detectadas))
-                            evidence_path = None
-                            try:
-                                if missing_helmet or missing_vest:
-                                    if not os.path.exists(CAPTURES_DIR):
-                                        os.makedirs(CAPTURES_DIR, exist_ok=True)
-                                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                                    filename = f"{self.title.replace(' ', '_')}_{timestamp}.jpg"
-                                    evidence_path = os.path.join(CAPTURES_DIR, filename)
-                                    # Write annotated_frame (BGR) as JPEG
-                                    cv2.imwrite(evidence_path, annotated_frame)
-                            except Exception as e:
-                                logging.error(f"No se pudo guardar evidencia: {e}")
+                            if boxes is not None and hasattr(boxes, 'xyxy') and hasattr(boxes, 'cls'):
+                                xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, 'cpu') else boxes.xyxy.numpy()
+                                clase_ids = boxes.cls.cpu().numpy() if hasattr(boxes.cls, 'cpu') else boxes.cls.numpy()
 
-                            # Pass evidence_path (may be None) to detect_event
-                            self.subject.detect_event(clases_detectadas, self.title, user_identified, evidence_path)
+                                flat = []
+                                for i, box in enumerate(xyxy):
+                                    x1, y1, x2, y2 = [int(v) for v in box]
+                                    cx = int((x1 + x2) / 2)
+                                    cy = int((y1 + y2) / 2)
+                                    cname = res0.names[int(clase_ids[i])]
+                                    flat.append({'class': cname, 'cx': cx, 'cy': cy, 'bbox': (x1, y1, x2, y2)})
+
+                                next_pid = 1
+                                for det in flat:
+                                    assigned = None
+                                    for pid, info in persons.items():
+                                        avgx = int(sum([c[0] for c in info['centers']]) / len(info['centers']))
+                                        avgy = int(sum([c[1] for c in info['centers']]) / len(info['centers']))
+                                        dist = ((avgx - det['cx']) ** 2 + (avgy - det['cy']) ** 2) ** 0.5
+                                        if dist < 120:
+                                            assigned = pid
+                                            break
+
+                                    if assigned is None:
+                                        assigned = next_pid
+                                        persons[assigned] = {'classes': set(), 'centers': [], 'bboxes': []}
+                                        next_pid += 1
+
+                                    persons[assigned]['classes'].add(det['class'])
+                                    persons[assigned]['centers'].append((det['cx'], det['cy']))
+                                    persons[assigned]['bboxes'].append(det['bbox'])
+
+                            # Matchear QRs por proximidad y asignar usuarios
+                            qr_mapping = {}
+                            
+                            # Primera pasada: asignar QRs a la persona más cercana
+                            for qr in qr_map_by_pos:
+                                user_info, qx, qy, rect = qr
+                                if qx is None or qy is None:
+                                    continue
+                                
+                                best_pid = None
+                                best_dist = float('inf')
+                                
+                                # Encontrar la persona más cercana al QR
+                                for pid, info in persons.items():
+                                    avgx = int(sum([c[0] for c in info['centers']]) / len(info['centers']))
+                                    avgy = int(sum([c[1] for c in info['centers']]) / len(info['centers']))
+                                    dist = ((avgx - qx) ** 2 + (avgy - qy) ** 2) ** 0.5
+                                    if dist < best_dist and dist < 200:  # Ajustar umbral según necesidad
+                                        best_dist = dist
+                                        best_pid = pid
+                                
+                                # Asignar QR a la persona más cercana y a personas cercanas
+                                if best_pid is not None:
+                                    # Asignar al más cercano
+                                    qr_mapping[f'qr_{best_pid}'] = user_info
+                                    
+                                    # Asignar a otras personas cercanas
+                                    for pid, info in persons.items():
+                                        if pid != best_pid:
+                                            avgx = int(sum([c[0] for c in info['centers']]) / len(info['centers']))
+                                            avgy = int(sum([c[1] for c in info['centers']]) / len(info['centers']))
+                                            dist = ((avgx - qx) ** 2 + (avgy - qy) ** 2) ** 0.5
+                                            if dist < 400:  # Umbral más amplio para personas cercanas
+                                                qr_mapping[f'qr_{pid}'] = user_info
+                
+                            # QRが検出された場合は必ずグローバルマッピングに追加
+                            if qr_map_by_pos:
+                                # 最も新しいQRを使用
+                                qr_mapping['any'] = qr_map_by_pos[0][0]  
+                                # すべての人物に対してQRを関連付け
+                                for pid in persons.keys():
+                                    if f'qr_{pid}' not in qr_mapping:
+                                        qr_mapping[f'qr_{pid}'] = qr_map_by_pos[0][0]
+
+                            # Construir clases_detectadas con sufijos por persona
+                            clases_detectadas = []
+                            for pid, info in persons.items():
+                                for c in info['classes']:
+                                    clases_detectadas.append(f"{c}_{pid}")
+                                if f'qr_{pid}' in qr_mapping:
+                                    clases_detectadas.append(f"qr_{pid}")
+
+                            # Fallback: si no agrupó, intentar mantener lista plana
+                            if not clases_detectadas and boxes is not None:
+                                try:
+                                    clase_ids = boxes.cls
+                                    clases_detectadas = [res0.names[int(c)] for c in clase_ids]
+                                except Exception:
+                                    clases_detectadas = []
+
+                            # Notificar eventos de seguridad usando qr_mapping para identificar usuarios por persona
+                            if self.subject and clases_detectadas:
+                                missing_any = False
+                                for pid, info in persons.items():
+                                    if 'helmet' not in info['classes']:
+                                        missing_any = True
+                                    if not (('reflective' in info['classes']) or ('vest' in info['classes'])):
+                                        missing_any = True
+
+                                evidence_path = None
+                                try:
+                                    if missing_any:
+                                        # limitar la frecuencia de notificación por cámara para reducir ruido
+                                        nowt = time.time()
+                                        if nowt - getattr(self, 'ultima_alerta', 0) < 2.0:
+                                            # Skip notifying too-frequent alerts for the same camera
+                                            pass
+                                        else:
+                                            if not os.path.exists(CAPTURES_DIR):
+                                                os.makedirs(CAPTURES_DIR, exist_ok=True)
+                                            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                            filename = f"{self.title.replace(' ', '_')}_{timestamp}.jpg"
+                                            evidence_path = os.path.join(CAPTURES_DIR, filename)
+                                            cv2.imwrite(evidence_path, annotated_frame)
+                                            # Pasar el mapping (p.e. {'qr_1':'nombre','qr_2':'otro','any':'...'} )
+                                            self.subject.detect_event(clases_detectadas, self.title, qr_mapping, evidence_path)
+                                            # actualizar última notificación para esta cámara
+                                            try:
+                                                self.ultima_alerta = nowt
+                                            except Exception:
+                                                self.ultima_alerta = time.time()
+                                except Exception as e:
+                                    logging.error(f"No se pudo guardar evidencia: {e}")
+                        except Exception:
+                            # Si hay cualquier fallo en la lógica de agrupación, asegurar que clases_detectadas sea lista vacía
+                            clases_detectadas = []
                 except Exception as e:
                     logging.error(f"Error predict YOLO en {self.title}: {str(e)}")
                     annotated_frame = frame

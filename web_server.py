@@ -276,13 +276,46 @@ async def api_create_user(request: Request):
     data = await request.json()
     username = data.get('username')
     password = data.get('password')
+    role = data.get('role', 'guest')
     qr = data.get('qr_code')
     if not username or not password:
         raise HTTPException(status_code=400, detail='username and password required')
+    # permission checks: admin can create any, supervisor cannot create admin, guest cannot create
+    current = _get_current_user(request)
+    if not current:
+        raise HTTPException(status_code=401, detail='Authentication required')
+    cur_id, cur_name, cur_role = current
+    cur_role = str(cur_role).lower()
+    role = str(role).lower()
+    if cur_role == 'guest':
+        raise HTTPException(status_code=403, detail='Guests cannot create users')
+    if cur_role == 'supervisor' and role == 'admin':
+        raise HTTPException(status_code=403, detail='Supervisor cannot create admin users')
     try:
         ok = register_user(username, password, qr)
         if not ok:
             raise HTTPException(status_code=400, detail='Could not register user (maybe duplicate)')
+        # If role other than default 'guest' is requested and DB needs update, set role
+        if role and role != 'guest':
+            # find user id and update role
+            rows = list_users()
+            new_user = None
+            for r in rows:
+                if r[1] == username:
+                    new_user = r
+                    break
+            if new_user:
+                try:
+                    update_user(new_user[0], username=username, qr_code=qr)
+                    # set role via direct DB update for simplicity
+                    import sqlite3
+                    conn = sqlite3.connect(DB_PATH)
+                    cur = conn.cursor()
+                    cur.execute('UPDATE users SET role=? WHERE id=?', (role, new_user[0]))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
         return JSONResponse({'ok': True})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -319,13 +352,29 @@ async def api_delete_user(user_id: int, request: Request):
         raise HTTPException(status_code=401, detail='Authentication required')
     cur_id, cur_name, cur_role = current
     cur_role = str(cur_role).lower()
-    # Prevent deleting self and require admin role for deleting others
+    try:
+        target = get_user_by_id(user_id)
+    except Exception:
+        target = None
+    if not target:
+        raise HTTPException(status_code=404, detail='User not found')
+    target_role = str(target[2]).lower()
+    # Prevent deleting self to avoid accidental lockout
     if int(cur_id) == int(user_id):
         raise HTTPException(status_code=403, detail='Cannot delete yourself')
-    if cur_role != 'admin':
-        raise HTTPException(status_code=403, detail='Admin only')
+    # Admin can delete anyone who is not admin
+    if cur_role == 'admin':
+        if target_role == 'admin':
+            raise HTTPException(status_code=403, detail='Cannot delete other admins')
+        # allowed
+    elif cur_role == 'supervisor':
+        # supervisor can delete only guests
+        if target_role != 'guest':
+            raise HTTPException(status_code=403, detail='Supervisor can only delete guest users')
+    else:
+        raise HTTPException(status_code=403, detail='Not allowed')
+
     try:
-        from database import delete_user
         ok = delete_user(user_id)
         if not ok:
             raise HTTPException(status_code=500, detail='Delete failed')
@@ -509,6 +558,9 @@ async def report_csv(request: Request):
     user = _get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail='Authentication required')
+    # disallow guest from downloading reports
+    if str(user[2]).lower() == 'guest':
+        raise HTTPException(status_code=403, detail='Guests cannot download reports')
     out = generate_report(output_path='reporte_analizado.csv')
     if not os.path.exists(out):
         raise HTTPException(status_code=500, detail='Report generation failed')
@@ -520,6 +572,8 @@ async def report_xlsx(request: Request):
     user = _get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail='Authentication required')
+    if str(user[2]).lower() == 'guest':
+        raise HTTPException(status_code=403, detail='Guests cannot download reports')
     try:
         out = generate_report_xlsx(output_path='reporte_analizado.xlsx')
     except Exception as e:
@@ -529,6 +583,8 @@ async def report_pdf(request: Request):
     user = _get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail='Authentication required')
+    if str(user[2]).lower() == 'guest':
+        raise HTTPException(status_code=403, detail='Guests cannot download reports')
     try:
         out = generate_report_pdf(output_pdf='reporte_analizado.pdf')
     except Exception as e:

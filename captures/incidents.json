@@ -1,5 +1,26 @@
 [
   {
+    "ts": "2025-10-30 23:23:57",
+    "ts_epoch": 1761884637.6028755,
+    "summary": "sin casco — Cámara 1 2025-10-30 23:23:57",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 23:23:55",
+    "ts_epoch": 1761884635.693671,
+    "summary": "sin casco — Cámara 1 2025-10-30 23:23:55",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 23:23:54",
+    "ts_epoch": 1761884634.3442378,
+    "summary": "sin casco — Cámara 1 2025-10-30 23:23:54",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
     "ts": "2025-10-30 22:41:38",
     "ts_epoch": 1761882098.121793,
     "summary": "sin casco — Cámara 1 2025-10-30 22:41:38",

@@ -7,7 +7,7 @@ MODEL_PATH = os.path.join(PROJECT_ROOT, 'runs', 'detect', 'train9', 'weights', '
 DB_PATH = os.path.join(PROJECT_ROOT, 'safety_monitor.db')
 CAPTURES_DIR = os.path.join(PROJECT_ROOT, 'captures')
 
-# Umbrales por defecto (ajustables por CU-025)
+# Umbrales por defecto
 DEFAULT_CONF = 0.9
 ALERT_COOLDOWN = 10  # Segundos
 QR_COOLDOWN = 5  # Segundos entre detecciones del mismo QR

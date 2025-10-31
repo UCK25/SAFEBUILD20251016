@@ -69,11 +69,20 @@ except Exception:
 # manually (e.g., a management script) before starting the server.
 
 # Model load: try custom weights then fallback to yolov8n
-MODEL_PATHS = [
+# Allow overriding model via environment variable (useful for Render/Docker deployments)
+MODEL_FILE_ENV = os.environ.get('MODEL_FILE')
+if MODEL_FILE_ENV:
+    print(f"[server] MODEL_FILE env set: {MODEL_FILE_ENV}")
+
+MODEL_PATHS = []
+if MODEL_FILE_ENV:
+    MODEL_PATHS.append(MODEL_FILE_ENV)
+# default candidate paths in repo
+MODEL_PATHS.extend([
     os.path.join(os.path.dirname(__file__), 'runs/detect/train9/weights/best.pt'),
     os.path.join(os.path.dirname(__file__), 'runs/detect/train/weights/best.pt'),
     'best.pt'
-]
+])
 
 print("[server] Inicializando modelo de detección...")
 model = None

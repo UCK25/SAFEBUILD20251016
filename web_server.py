@@ -403,7 +403,8 @@ async def api_login(request: Request):
     resp = JSONResponse({'ok': True, 'user': {'id': user[0], 'username': user[1], 'role': user[2]}})
     if SERIALIZER is not None:
         token = SERIALIZER.dumps({'id': int(user[0]), 'username': user[1], 'role': user[2]})
-        resp.set_cookie('safebuild_session', token, httponly=True, max_age=24*3600)
+        # set SameSite to Lax so navigation from same-site pages keeps the cookie
+        resp.set_cookie('safebuild_session', token, httponly=True, max_age=24*3600, samesite='Lax')
     return resp
 
 
@@ -567,7 +568,7 @@ async def detect(frame: UploadFile = File(...)):
     # Register a generic incident so it appears in DB (PPE_violation)
     try:
         # try to resolve user from recent QR logs/mappings
-        user_name = _resolve_user_from_recent_qr(boxes_out=None, time_window_seconds=1)
+        user_name = _resolve_user_from_recent_qr(boxes_out=None, time_window_seconds=0.5)
         try:
                     # If we just resolved a user, try to update a recent 'unknown' incident to set the user
                     updated_existing = False
@@ -757,11 +758,11 @@ async def detect_json(frame: UploadFile = File(...)):
                         user_name = _find_user_by_qr_value(qr_entry.get('qr'))
                         if not user_name:
                             # fallback: try resolving from recent logs with proximity/time
-                            user_name = _resolve_user_from_recent_qr(boxes_out=boxes_out, time_window_seconds=1)
+                            user_name = _resolve_user_from_recent_qr(boxes_out=boxes_out, time_window_seconds=0.5)
                     except Exception:
                         user_name = None
                 else:
-                    user_name = _resolve_user_from_recent_qr(boxes_out=boxes_out, time_window_seconds=1)
+                    user_name = _resolve_user_from_recent_qr(boxes_out=boxes_out, time_window_seconds=0.5)
 
                 annotated_io = detect_and_annotate(img_np)
                 fname = None
@@ -1045,7 +1046,7 @@ def _find_user_by_qr_value(qr_value):
     return None
 
 
-def _resolve_user_from_recent_qr(boxes_out=None, time_window_seconds=1):
+def _resolve_user_from_recent_qr(boxes_out=None, time_window_seconds=0.5):
     """
     Attempt to resolve a user name from the most recent QR logs and mappings.
     If boxes_out is provided and the most recent QR entry contains points and image size,

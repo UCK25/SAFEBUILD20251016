@@ -50,4 +50,5 @@ ID,Cámara,Tipo,Timestamp,Descripción,Status,Usuario Identificado,EvidencePath
 151,web_demo,PPE_violation,2025-10-29 22:03:11,Detección desde web demo,open,,C:\Users\kenka\Downloads\SAFEBUILD29\captures\capture_20251029_221417.jpg
 152,web_demo,PPE_violation,2025-10-29 23:17:00,Detección desde web demo,open,,C:\Users\kenka\Downloads\SAFEBUILD29\captures\capture_20251030_001043.jpg
 153,web_demo,PPE_violation,2025-10-30 00:01:17,Detección desde web demo,open,admin,C:\Users\kenka\Downloads\SAFEBUILD29\captures\capture_20251030_000127.jpg
-154,web_demo,PPE_violation,2025-10-30 20:52:22,Detección desde web demo,open,,C:\Users\kenka\Downloads\SAFEBUILD29\captures\capture_20251030_214207.jpg
+154,web_demo,PPE_violation,2025-10-30 20:52:22,Detección desde web demo,open,,C:\Users\kenka\Downloads\SAFEBUILD29\captures\capture_20251030_214353.jpg
+155,web_demo,PPE_violation,2025-10-30 22:39:16,Detección desde web demo,open,,C:\Users\kenka\Downloads\SAFEBUILD29\captures\capture_20251030_224138.jpg

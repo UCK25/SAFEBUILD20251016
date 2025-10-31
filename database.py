@@ -32,7 +32,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Tabla Usuarios (CU-001 a CU-006)
+    # Tabla Usuarios
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,7 +43,7 @@ def init_db():
         )
     ''')
     
-    # Tabla Cámaras (CU-007 a CU-011)
+    # Tabla Cámaras
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS cameras (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +53,7 @@ def init_db():
         )
     ''')
     
-    # Tabla Incidentes (CU-014, CU-017, CU-019 a CU-021)
+    # Tabla Incidentes
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS incidents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

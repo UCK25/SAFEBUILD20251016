@@ -41,7 +41,7 @@ document.getElementById('backBtn').addEventListener('click', ()=>{ window.locati
 async function fetchUsers(){
   const tbody = document.querySelector('#usersTable tbody'); tbody.innerHTML='';
   try{
-    const res = await fetch('/api/users');
+  const res = await fetch('/api/users', { credentials: 'include' });
     if(!res.ok){
       tbody.innerHTML = '<tr><td colspan="5">No autorizado. Autentique para ver usuarios.</td></tr>';
       return;
@@ -56,7 +56,7 @@ async function fetchUsers(){
       const masked = '********';
       tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>${masked}</td>`;
       const actions = document.createElement('td');
-      const dl = document.createElement('button'); dl.textContent='Descargar QR'; dl.onclick = async ()=>{ try{ const resp = await fetch(`/api/download_qr/${u.id}`); if(!resp.ok) return alert('No permitido'); const blob = await resp.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download=`${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove(); }catch(e){ alert(e.message) } };
+  const dl = document.createElement('button'); dl.textContent='Descargar QR'; dl.onclick = async ()=>{ try{ const resp = await fetch(`/api/download_qr/${u.id}`, { credentials: 'include' }); if(!resp.ok) return alert('No permitido'); const blob = await resp.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download=`${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove(); }catch(e){ alert(e.message) } };
       actions.appendChild(dl);
       // edit username if permissions
       if(['admin','supervisor'].includes((currentUser||{}).role)){
@@ -74,7 +74,7 @@ async function fetchUsers(){
 
 function editUser(u){
   const newName = prompt('Nuevo username', u.username); if(newName===null) return;
-  fetch('/api/users/'+u.id, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify({username:newName, qr_code:u.qr_code}) }).then(r=>{ if(!r.ok) alert('Error'); else { alert('Actualizado'); fetchUsers(); } });
+  fetch('/api/users/'+u.id, { method:'PUT', credentials: 'include', headers:{'content-type':'application/json'}, body: JSON.stringify({username:newName, qr_code:u.qr_code}) }).then(r=>{ if(!r.ok) alert('Error'); else { alert('Actualizado'); fetchUsers(); } });
 }
 
 // QR / mapping UI removed: this functionality is internal and intentionally not exposed in the Gestionar UI.
@@ -82,7 +82,7 @@ function editUser(u){
 // init
 async function init(){
   try{
-    const me = await fetch('/api/me');
+    const me = await fetch('/api/me', { credentials: 'include' });
     if(me.ok){ const jd = await me.json(); if(jd.ok) currentUser = jd.user; }
   }catch(e){ /* ignore */ }
   fetchUsers();

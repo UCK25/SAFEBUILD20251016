@@ -92,10 +92,27 @@
 <script>
 let currentUser = null;
 
+// helper: convert server timestamp 'YYYY-MM-DD HH:MM:SS' to local display
+function formatLocal(ts){
+  if(!ts) return '';
+  try{
+    const s = ts.replace(' ', 'T');
+    const d = new Date(s);
+    if(isNaN(d.getTime())){
+      const parts = ts.split(' ');
+      if(parts.length<2) return ts;
+      const date = parts[0].split('-'); const time = parts[1].split(':');
+      const dd = new Date(date[0], parseInt(date[1],10)-1, date[2], time[0], time[1], time[2]);
+      return dd.toLocaleString();
+    }
+    return d.toLocaleString();
+  }catch(e){ return ts; }
+}
+
 document.getElementById('logoutBtn').addEventListener('click', async ()=>{
   try{
     // Ask server to clear session cookie
-    await fetch('/api/logout', { method: 'POST' });
+    await fetch('/api/logout', { method: 'POST', credentials: 'include' });
   }catch(e){ /* ignore */ }
   // clear client state
   currentUser = null;
@@ -105,7 +122,7 @@ document.getElementById('logoutBtn').addEventListener('click', async ()=>{
 });
 async function fetchIncidents(){
   // Render incidents as a simple live log (newest first), similar to QR Escaneados
-  const res = await fetch('/api/incidents');
+  const res = await fetch('/api/incidents', { credentials: 'include' });
   const data = await res.json();
   const log = document.getElementById('incidentsLog');
   log.innerHTML = '';
@@ -128,7 +145,7 @@ async function fetchIncidents(){
 }
 
 async function fetchUsers(){
-  const res = await fetch('/api/users');
+  const res = await fetch('/api/users', { credentials: 'include' });
   const data = await res.json();
   const tbody = document.querySelector('#usersTable tbody');
   tbody.innerHTML = '';
@@ -194,7 +211,7 @@ if(modalLoginBtn){
     const uel = document.getElementById('modal_user'); const pel = document.getElementById('modal_pass');
     const u = uel? uel.value : null; const p = pel? pel.value : null;
     if(!u || !p) return alert('Usuario y contraseña requeridos');
-    const res = await fetch('/api/login', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({username:u, password:p}) });
+  const res = await fetch('/api/login', { method:'POST', credentials: 'include', headers:{'content-type':'application/json'}, body: JSON.stringify({username:u, password:p}) });
     if(!res.ok) return alert('Login falló');
     const data = await res.json();
     if(data.ok){ 
@@ -212,11 +229,16 @@ if(modalLoginBtn){
 // report modal generate
 const genReportBtn = document.getElementById('genReportBtn');
 if(genReportBtn){
-  genReportBtn.addEventListener('click', ()=>{
+  genReportBtn.addEventListener('click', async ()=>{
     const fromEl = document.getElementById('rep_from'); const toEl = document.getElementById('rep_to'); const fmtEl = document.getElementById('rep_format');
     const from = fromEl? fromEl.value : '';
     const to = toEl? toEl.value : '';
     const fmt = fmtEl? fmtEl.value : 'csv';
+    // check auth first to avoid opening a new tab with JSON error
+    try{
+      const me = await fetch('/api/me', { credentials: 'include' });
+      if(!me.ok){ alert('Debe autenticarse para generar reportes'); return; }
+    }catch(e){ alert('Error verificando autenticación'); return; }
     let url = '/report/' + fmt;
     const params = new URLSearchParams(); if(from) params.set('from', from); if(to) params.set('to', to);
     if(Array.from(params).length) url += '?' + params.toString();
@@ -228,7 +250,7 @@ if(genReportBtn){
 // Manage users modal loader
 async function loadManageUsers(){
   const el = document.getElementById('manageContent'); el.innerHTML = '<p>Cargando usuarios...</p>';
-  const res = await fetch('/api/users');
+  const res = await fetch('/api/users', { credentials: 'include' });
   if(!res.ok){ el.innerHTML = '<p>No autorizado o error al recuperar usuarios</p>'; return; }
   const users = await res.json();
   renderManageUsers(users);
@@ -274,7 +296,7 @@ async function simpleEditUser(u){
   const newRole = prompt('Nuevo role (admin|supervisor|guest)', u.role);
   if(newRole===null) return;
   try{
-    const res = await fetch('/api/users', { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify({id:u.id, username:newName, role:newRole}) });
+  const res = await fetch('/api/users', { method:'PUT', credentials: 'include', headers:{'content-type':'application/json'}, body: JSON.stringify({id:u.id, username:newName, role:newRole}) });
     if(!res.ok) return alert('Error al actualizar');
     alert('Actualizado'); loadManageUsers(); fetchUsers();
   }catch(e){ alert('Error: '+e.message) }
@@ -283,7 +305,7 @@ async function simpleEditUser(u){
 // initial load: check server session so navigating back doesn't drop the user
 async function initialLoad(){
   try{
-    const me = await fetch('/api/me');
+  const me = await fetch('/api/me', { credentials: 'include' });
     if(me.ok){ const jd = await me.json(); if(jd.ok){ currentUser = jd.user; const disp = document.getElementById('currentUserDisplay'); if(disp) disp.textContent = `${currentUser.username} (${currentUser.role})`; const logoutBtn = document.getElementById('logoutBtn'); if(logoutBtn) logoutBtn.disabled = false; } }
   }catch(e){ /* ignore */ }
   fetchIncidents(); fetchUsers();
@@ -297,6 +319,7 @@ let dashCaptureCtx = null;
 let overlayCanvas = document.getElementById('overlayCanvas');
 let overlayCtx = overlayCanvas ? overlayCanvas.getContext('2d') : null;
 let dashInterval = null;
+let dashReady = false;
 // latest state holders
 let latestDetections = [];
 let latestQREntry = null;
@@ -330,6 +353,7 @@ async function startDashCamera(){
     dashCaptureCtx = dashCaptureCanvas.getContext('2d');
     // set overlay internal size to match capture size
     if(overlayCanvas){ overlayCanvas.width = dashCaptureCanvas.width; overlayCanvas.height = dashCaptureCanvas.height; overlayCtx = overlayCanvas.getContext('2d'); }
+  dashReady = true;
 
     // polling detect_json
     dashInterval = setInterval(async ()=>{
@@ -355,7 +379,7 @@ async function startDashCamera(){
               latestQREntry = j.qr;
               lastQSeenTs = Date.now();
               const el = document.getElementById('qrScans');
-              if(el){ const entry = j.qr; const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; const who = entry.user || entry.qr || '(sin texto)'; d.textContent = `${entry.ts} — ${who}`; el.insertBefore(d, el.firstChild); while(el.childNodes.length > 10) el.removeChild(el.lastChild); }
+              if(el){ const entry = j.qr; const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; const who = entry.user || entry.qr || '(sin texto)'; d.textContent = `${formatLocal(entry.ts)} — ${who}`; el.insertBefore(d, el.firstChild); while(el.childNodes.length > 10) el.removeChild(el.lastChild); }
               renderOverlay();
             }catch(e){ console.warn('apply qr immediate', e); }
           } else {
@@ -402,7 +426,8 @@ function renderOverlay(){
     });
   }
   // draw QR overlay if present (green rectangle)
-  if(latestQREntry && latestQREntry.points && latestQREntry.image_w && latestQREntry.image_h){
+  // Only draw QR overlay when camera/capture is ready to avoid showing stale QR on initial blank screen
+  if(dashReady && latestQREntry && latestQREntry.points && latestQREntry.image_w && latestQREntry.image_h){
     try{
       const p = latestQREntry.points; // array of [x,y]
       const imgW = latestQREntry.image_w, imgH = latestQREntry.image_h;
@@ -448,7 +473,7 @@ async function pollLastQR(){
         const el = document.getElementById('qrScans');
         if(el){
               const who = entry.user || entry.qr || '(sin texto)';
-              const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; d.textContent = `${entry.ts} — ${who}`;
+              const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; d.textContent = `${formatLocal(entry.ts)} — ${who}`;
           el.insertBefore(d, el.firstChild);
           // keep max 10
           while(el.childNodes.length > 10) el.removeChild(el.lastChild);
@@ -475,7 +500,7 @@ async function pollLastIncidents(){
         const el = document.getElementById('incidentsLog');
         if(el){
           const d = document.createElement('div'); d.style.padding='8px'; d.style.borderBottom='1px solid #123';
-          const hdr = document.createElement('div'); hdr.style.fontWeight='600'; hdr.textContent = entry.summary || (entry.ts + ' — Incidente');
+          const hdr = document.createElement('div'); hdr.style.fontWeight='600'; hdr.textContent = entry.summary || (formatLocal(entry.ts) + ' — Incidente');
           const det = document.createElement('div'); det.style.color='#bcd'; det.style.fontSize='0.9em'; det.textContent = entry.detail || ((entry.type || 'Incidente') + ' - Usuario: ' + (entry.user_identified || entry.user || 'unknown'));
           d.appendChild(hdr); d.appendChild(det);
           el.insertBefore(d, el.firstChild);

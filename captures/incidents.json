@@ -1,5 +1,124 @@
 [
   {
+    "ts": "2025-10-30 21:43:53",
+    "ts_epoch": 1761878633.7358952,
+    "summary": "sin casco — Cámara 1 2025-10-30 21:43:53",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 21:43:52",
+    "ts_epoch": 1761878632.0518854,
+    "summary": "sin casco — Cámara 1 2025-10-30 21:43:52",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 21:43:48",
+    "ts_epoch": 1761878628.6767297,
+    "summary": "sin casco — Cámara 1 2025-10-30 21:43:48",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 21:43:21",
+    "ts_epoch": 1761878601.380705,
+    "summary": "sin casco — Cámara 1 2025-10-30 21:43:21",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 21:42:07",
+    "ts_epoch": 1761878527.651347,
+    "summary": "sin casco — Cámara 1 2025-10-30 21:42:07",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:37",
+    "ts_epoch": 1761875557.084634,
+    "summary": "sin casco — Cámara 1 2025-10-30 20:52:37",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:34",
+    "ts_epoch": 1761875554.9688194,
+    "summary": "sin casco — Cámara 1 2025-10-30 20:52:34",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:34",
+    "ts_epoch": 1761875554.0941732,
+    "summary": "sin casco — Cámara 1 2025-10-30 20:52:34",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:33",
+    "ts_epoch": 1761875553.2124953,
+    "summary": "sin chaleco — Cámara 1 2025-10-30 20:52:33",
+    "detail": "sin chaleco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:32",
+    "ts_epoch": 1761875552.6766245,
+    "summary": "sin chaleco — Cámara 1 2025-10-30 20:52:32",
+    "detail": "sin chaleco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:31",
+    "ts_epoch": 1761875551.5093918,
+    "summary": "sin casco — Cámara 1 2025-10-30 20:52:31",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:30",
+    "ts_epoch": 1761875550.677153,
+    "summary": "sin casco — Cámara 1 2025-10-30 20:52:30",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:30",
+    "ts_epoch": 1761875550.1337593,
+    "summary": "sin chaleco — Cámara 1 2025-10-30 20:52:30",
+    "detail": "sin chaleco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:28",
+    "ts_epoch": 1761875548.9860017,
+    "summary": "sin casco — Cámara 1 2025-10-30 20:52:28",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:28",
+    "ts_epoch": 1761875548.4773223,
+    "summary": "sin casco — Cámara 1 2025-10-30 20:52:28",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:25",
+    "ts_epoch": 1761875545.302958,
+    "summary": "sin casco — Cámara 1 2025-10-30 20:52:25",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
+    "ts": "2025-10-30 20:52:22",
+    "ts_epoch": 1761875542.9143977,
+    "summary": "sin casco — Cámara 1 2025-10-30 20:52:22",
+    "detail": "sin casco - Usuario: unknown",
+    "user": null
+  },
+  {
     "ts": "2025-10-30 00:10:43",
     "ts_epoch": 1761801043.5811682,
     "summary": "sin casco — Cámara 1 2025-10-30 00:10:43",

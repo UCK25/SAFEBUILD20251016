@@ -39,25 +39,37 @@ let currentUser = null;
 document.getElementById('backBtn').addEventListener('click', ()=>{ window.location='/dashboard'; });
 
 async function fetchUsers(){
-  const res = await fetch('/api/users');
-  if(!res.ok) return alert('No autorizado');
-  const data = await res.json();
   const tbody = document.querySelector('#usersTable tbody'); tbody.innerHTML='';
-  data.forEach(u=>{
-    const tr = document.createElement('tr');
-    const masked = '********';
-    tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>${masked}</td>`;
-    const actions = document.createElement('td');
-    const dl = document.createElement('button'); dl.textContent='Descargar QR'; dl.onclick = async ()=>{ try{ const resp = await fetch(`/api/download_qr/${u.id}`); if(!resp.ok) return alert('No permitido'); const blob = await resp.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download=`${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove(); }catch(e){ alert(e.message) } };
-    actions.appendChild(dl);
-    // edit username if permissions
-    if(['admin','supervisor'].includes((currentUser||{}).role)){
-      const edit = document.createElement('button'); edit.textContent='Editar'; edit.onclick = ()=>{ editUser(u); };
-      actions.appendChild(edit);
+  try{
+    const res = await fetch('/api/users');
+    if(!res.ok){
+      tbody.innerHTML = '<tr><td colspan="5">No autorizado. Autentique para ver usuarios.</td></tr>';
+      return;
     }
-    tr.appendChild(actions);
-  tbody.appendChild(tr);
-  });
+    const data = await res.json();
+    if(!data || !data.length){
+      tbody.innerHTML = '<tr><td colspan="5">No hay usuarios o no tiene permisos para verlos.</td></tr>';
+      return;
+    }
+    data.forEach(u=>{
+      const tr = document.createElement('tr');
+      const masked = '********';
+      tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>${masked}</td>`;
+      const actions = document.createElement('td');
+      const dl = document.createElement('button'); dl.textContent='Descargar QR'; dl.onclick = async ()=>{ try{ const resp = await fetch(`/api/download_qr/${u.id}`); if(!resp.ok) return alert('No permitido'); const blob = await resp.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download=`${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove(); }catch(e){ alert(e.message) } };
+      actions.appendChild(dl);
+      // edit username if permissions
+      if(['admin','supervisor'].includes((currentUser||{}).role)){
+        const edit = document.createElement('button'); edit.textContent='Editar'; edit.onclick = ()=>{ editUser(u); };
+        actions.appendChild(edit);
+      }
+      tr.appendChild(actions);
+      tbody.appendChild(tr);
+    });
+  }catch(e){
+    tbody.innerHTML = '<tr><td colspan="5">Error al recuperar usuarios.</td></tr>';
+    console.warn('fetchUsers error', e);
+  }
 }
 
 function editUser(u){

@@ -18,10 +18,9 @@ from database import (
     list_incidents, update_incident, list_users, authenticate_user,
     generate_report, generate_report_xlsx, generate_report_pdf,
     list_cameras, register_camera, get_user_by_id, register_incident,
-    register_user, delete_user, update_user
+    register_user, delete_user, update_user, init_db, ensure_admin_exists
 )
-from config import CAPTURES_DIR
-from config import DB_PATH
+from config import CAPTURES_DIR, DB_PATH, DEFAULT_CONF
 
 # Simple session cookie using itsdangerous
 try:
@@ -68,6 +67,15 @@ except Exception:
 # existing database. If you need to create the schema, run `database.init_db()`
 # manually (e.g., a management script) before starting the server.
 
+# Ensure DB schema exists and there's always at least one admin user.
+try:
+    # init_db is safe and idempotent; will create schema and default admin if missing
+    init_db()
+    ensure_admin_exists()
+    print('[server] Database initialization/ensure_admin executed')
+except Exception as e:
+    print('[server] Warning: database init/ensure_admin failed:', e)
+
 # Model load: try custom weights then fallback to yolov8n
 # Allow overriding model via environment variable (useful for Render/Docker deployments)
 MODEL_FILE_ENV = os.environ.get('MODEL_FILE')
@@ -80,7 +88,6 @@ if MODEL_FILE_ENV:
 # default candidate paths in repo
 MODEL_PATHS.extend([
     os.path.join(os.path.dirname(__file__), 'runs/detect/train9/weights/best.pt'),
-    os.path.join(os.path.dirname(__file__), 'runs/detect/train/weights/best.pt'),
     'best.pt'
 ])
 
@@ -123,7 +130,7 @@ def detect_and_annotate(image_np):
     annotated = image_np.copy()
     try:
         # increase confidence and iou slightly to reduce noisy detections
-        results = model.predict(source=image_np, imgsz=640, conf=0.8, iou=0.8, max_det=50, verbose=False)
+        results = model.predict(source=image_np, imgsz=640, conf=0.9, iou=0.9, max_det=50, verbose=False)
     except Exception as e:
         try:
             results = model(image_np, imgsz=640, conf=0.25, verbose=False)
@@ -562,7 +569,18 @@ async def detect(frame: UploadFile = File(...)):
         # try to resolve user from recent QR logs/mappings
         user_name = _resolve_user_from_recent_qr(boxes_out=None, time_window_seconds=1)
         try:
-            register_incident('web_demo', 'PPE_violation', 'Detección desde web demo', user_identified=user_name, evidence_path=fname)
+                    # If we just resolved a user, try to update a recent 'unknown' incident to set the user
+                    updated_existing = False
+                    if user_name:
+                        try:
+                            from database import update_incident_user_recent
+                            updated_existing = update_incident_user_recent('web_demo', 'PPE_violation', user_name, within_seconds=8)
+                        except Exception:
+                            updated_existing = False
+
+                    # Only register a new incident if we didn't update an existing recent unknown one
+                    if not updated_existing:
+                        register_incident('web_demo', 'PPE_violation', 'Detección desde web demo', user_identified=user_name, evidence_path=fname)
         except Exception as e:
             print('[server] Error registering incident:', e)
         # append to incident log for quick dashboard polling
@@ -592,8 +610,8 @@ async def detect_json(frame: UploadFile = File(...)):
         return JSONResponse({'ok': False, 'error': 'invalid image'}, status_code=400)
 
     try:
-        # run model with moderate thresholds
-        results = model.predict(source=img_np, imgsz=640, conf=0.35, iou=0.5, max_det=50, verbose=False)
+        # run model with configurable confidence threshold (from config.DEFAULT_CONF)
+        results = model.predict(source=img_np, imgsz=640, conf=DEFAULT_CONF, iou=0.5, max_det=50, verbose=False)
     except Exception:
         try:
             results = model(img_np, imgsz=640, conf=0.35, verbose=False)
@@ -614,6 +632,39 @@ async def detect_json(frame: UploadFile = File(...)):
                 cname = normalize_class_name(raw)
                 if cname in ("casco", "sin casco", "chaleco", "sin chaleco"):
                     boxes_out.append({'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'label': cname})
+
+    # Simple NMS / merge similar boxes to reduce duplicate detections and false positives
+    def _iou(a, b):
+        xa1, ya1, xa2, ya2 = a['x1'], a['y1'], a['x2'], a['y2']
+        xb1, yb1, xb2, yb2 = b['x1'], b['y1'], b['x2'], b['y2']
+        inter_x1 = max(xa1, xb1)
+        inter_y1 = max(ya1, yb1)
+        inter_x2 = min(xa2, xb2)
+        inter_y2 = min(ya2, yb2)
+        if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
+            return 0.0
+        inter = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+        area_a = (xa2 - xa1) * (ya2 - ya1)
+        area_b = (xb2 - xb1) * (yb2 - yb1)
+        union = area_a + area_b - inter
+        return inter / union if union > 0 else 0.0
+
+    # Merge boxes: for same label, if IoU > 0.45 keep larger box
+    merged = []
+    for b in boxes_out:
+        kept = True
+        for m in merged:
+            if m['label'] == b['label'] and _iou(m, b) > 0.45:
+                # keep the box with larger area
+                area_m = (m['x2'] - m['x1']) * (m['y2'] - m['y1'])
+                area_b = (b['x2'] - b['x1']) * (b['y2'] - b['y1'])
+                if area_b > area_m:
+                    m.update(b)
+                kept = False
+                break
+        if kept:
+            merged.append(b)
+    boxes_out = merged
 
     # QR detection (cv2 + optional pyzbar fallback)
     qr_entry = None

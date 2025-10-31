@@ -116,6 +116,33 @@ def init_db():
     conn.commit()
     conn.close()
 
+
+def ensure_admin_exists(default_username='admin', default_password='admin123', default_qr='ADMIN001'):
+    """
+    Ensure there is at least one user with role 'admin' in the database.
+    If none exists, insert a default admin with the provided password (hashed).
+    This is idempotent and safe to call on server startup.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
+        row = cursor.fetchone()
+        if not row or row[0] == 0:
+            hashed = _hash_password(default_password)
+            cursor.execute("INSERT INTO users (username, password, role, qr_code) VALUES (?, ?, ?, ?)",
+                           (default_username, hashed, 'admin', default_qr))
+            conn.commit()
+            return True
+        return False
+    except Exception:
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 # CRUD Usuarios
 def register_user(username, password, qr_code=None):
     try:
@@ -369,6 +396,45 @@ def update_incident(incident_id, status):
     cursor.execute("UPDATE incidents SET status=? WHERE id=?", (status, incident_id))
     conn.commit()
     conn.close()
+
+def update_incident_user_recent(camera_name, incident_type, user_identified, within_seconds: int = 10):
+    """
+    If there's a recent incident for camera_name and incident_type with unknown user
+    within `within_seconds`, update its user_identified to the provided value.
+    Returns True if updated, False otherwise.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, timestamp FROM incidents
+            WHERE camera_name=? AND type=? AND COALESCE(user_identified, 'unknown')='unknown'
+            ORDER BY timestamp DESC LIMIT 1
+        ''', (camera_name, incident_type))
+        row = cursor.fetchone()
+        if not row:
+            return False
+        inc_id, ts = row
+        try:
+            from datetime import datetime
+            last_dt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+            now_dt = datetime.now()
+            delta_sec = abs((now_dt - last_dt).total_seconds())
+        except Exception:
+            delta_sec = None
+
+        if delta_sec is not None and delta_sec <= within_seconds:
+            cursor.execute('UPDATE incidents SET user_identified=? WHERE id=?', (user_identified, inc_id))
+            conn.commit()
+            return True
+        return False
+    except Exception:
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 def log_qr_download(downloaded_by_id, target_user_id, download_path):
     """QRのダウンロードを記録"""

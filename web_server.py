@@ -453,7 +453,13 @@ async def api_login(request: Request):
     if SERIALIZER is not None:
         token = SERIALIZER.dumps({'id': int(user[0]), 'username': user[1], 'role': user[2]})
         # set SameSite to Lax so navigation from same-site pages keeps the cookie
-        resp.set_cookie('safebuild_session', token, httponly=True, max_age=24*3600, samesite='Lax')
+        # Set Secure flag when we detect HTTPS at the proxy (e.g. Render sets x-forwarded-proto)
+        try:
+            proto = request.headers.get('x-forwarded-proto') or request.url.scheme
+            secure = True if str(proto).lower() == 'https' else False
+        except Exception:
+            secure = False
+        resp.set_cookie('safebuild_session', token, httponly=True, max_age=24*3600, samesite='Lax', secure=secure)
     return resp
 
 

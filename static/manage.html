@@ -24,12 +24,28 @@
     </div>
 
     <div style="display:flex; gap:12px; align-items:flex-start;">
-      <div style="flex:1">
+      <div style="flex:2">
         <h3>Usuarios</h3>
         <table id="usersTable">
           <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>QR</th><th>Acciones</th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+      <div style="width:360px;">
+        <h3>Crear Usuario</h3>
+        <div style="background:#081428;padding:12px;border-radius:6px">
+          <label>Usuario<br><input id="new_username" style="width:100%"/></label><br><br>
+          <label>Contraseña<br><input id="new_password" type="password" style="width:100%"/></label><br><br>
+          <label>Rol<br>
+            <select id="new_role" style="width:100%">
+              <option value="guest">guest</option>
+              <option value="supervisor">supervisor</option>
+              <option value="admin">admin</option>
+            </select>
+          </label><br><br>
+          <label>QR (opcional)<br><input id="new_qr" style="width:100%"/></label><br><br>
+          <div style="text-align:right"><button id="createBtn">Crear</button></div>
+        </div>
       </div>
     </div>
   </div>
@@ -58,10 +74,25 @@ async function fetchUsers(){
       const actions = document.createElement('td');
   const dl = document.createElement('button'); dl.textContent='Descargar QR'; dl.onclick = async ()=>{ try{ const resp = await fetch(`/api/download_qr/${u.id}`, { credentials: 'include' }); if(!resp.ok) return alert('No permitido'); const blob = await resp.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download=`${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove(); }catch(e){ alert(e.message) } };
       actions.appendChild(dl);
-      // edit username if permissions
-      if(['admin','supervisor'].includes((currentUser||{}).role)){
+      // edit username/qr if permissions (admin or supervisor or self)
+      const curRole = (currentUser||{}).role || '';
+      if(currentUser && (parseInt(currentUser.id) === parseInt(u.id) || ['admin','supervisor'].includes(curRole))){
         const edit = document.createElement('button'); edit.textContent='Editar'; edit.onclick = ()=>{ editUser(u); };
         actions.appendChild(edit);
+      }
+      // delete button following rules: admin can delete non-admins, supervisor can delete guests, cannot delete self
+      let canDelete = false;
+      if(currentUser){
+        const curId = parseInt(currentUser.id);
+        const curRoleLow = (currentUser.role||'').toLowerCase();
+        if(curId !== parseInt(u.id)){
+          if(curRoleLow === 'admin' && (u.role||'').toLowerCase() !== 'admin') canDelete = true;
+          if(curRoleLow === 'supervisor' && (u.role||'').toLowerCase() === 'guest') canDelete = true;
+        }
+      }
+      if(canDelete){
+        const del = document.createElement('button'); del.textContent='Eliminar'; del.style.background='#8b2c2c'; del.onclick = ()=>{ if(confirm('Eliminar usuario '+u.username+'?')) deleteUser(u); };
+        actions.appendChild(del);
       }
       tr.appendChild(actions);
       tbody.appendChild(tr);
@@ -74,7 +105,34 @@ async function fetchUsers(){
 
 function editUser(u){
   const newName = prompt('Nuevo username', u.username); if(newName===null) return;
-  fetch('/api/users/'+u.id, { method:'PUT', credentials: 'include', headers:{'content-type':'application/json'}, body: JSON.stringify({username:newName, qr_code:u.qr_code}) }).then(r=>{ if(!r.ok) alert('Error'); else { alert('Actualizado'); fetchUsers(); } });
+  const newQr = prompt('QR (dejar en blanco para no cambiar)', '')
+  const body = { username: newName };
+  if(newQr !== null && newQr !== '') body.qr_code = newQr;
+  fetch('/api/users/'+u.id, { method:'PUT', credentials: 'include', headers:{'content-type':'application/json'}, body: JSON.stringify(body) }).then(async r=>{ if(!r.ok){ const txt = await r.text(); alert('Error: '+txt); } else { alert('Actualizado'); fetchUsers(); } });
+}
+
+async function createUser(){
+  const username = document.getElementById('new_username').value.trim();
+  const password = document.getElementById('new_password').value;
+  const role = document.getElementById('new_role').value;
+  const qr = document.getElementById('new_qr').value.trim() || null;
+  if(!username || !password) return alert('username y password son requeridos');
+  try{
+    const res = await fetch('/api/users', { method:'POST', credentials:'include', headers:{'content-type':'application/json'}, body: JSON.stringify({username, password, role, qr_code: qr}) });
+    if(!res.ok){ const t = await res.text(); return alert('Error: '+t); }
+    alert('Usuario creado');
+    document.getElementById('new_username').value=''; document.getElementById('new_password').value=''; document.getElementById('new_qr').value='';
+    fetchUsers();
+  }catch(e){ alert(e.message || e); }
+}
+
+async function deleteUser(u){
+  try{
+    const res = await fetch('/api/users/'+u.id, { method:'DELETE', credentials:'include' });
+    if(!res.ok){ const t = await res.text(); return alert('Error: '+t); }
+    alert('Eliminado');
+    fetchUsers();
+  }catch(e){ alert(e.message || e); }
 }
 
 // QR / mapping UI removed: this functionality is internal and intentionally not exposed in the Gestionar UI.
@@ -85,6 +143,19 @@ async function init(){
     const me = await fetch('/api/me', { credentials: 'include' });
     if(me.ok){ const jd = await me.json(); if(jd.ok) currentUser = jd.user; }
   }catch(e){ /* ignore */ }
+  // adjust role select availability: supervisors cannot create admin
+  if(currentUser && (currentUser.role||'').toLowerCase() === 'supervisor'){
+    const opt = document.querySelector('#new_role option[value="admin"]'); if(opt) opt.disabled = true;
+  }
+  // hide create panel for guests or unauthenticated
+  if(!currentUser || (currentUser.role||'').toLowerCase() === 'guest'){
+    document.getElementById('createBtn').disabled = true;
+    document.getElementById('new_username').disabled = true;
+    document.getElementById('new_password').disabled = true;
+    document.getElementById('new_role').disabled = true;
+    document.getElementById('new_qr').disabled = true;
+  }
+  document.getElementById('createBtn').addEventListener('click', createUser);
   fetchUsers();
 }
 init();

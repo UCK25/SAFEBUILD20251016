@@ -1,15 +1,11 @@
-streamlit==1.39.0
-streamlit-webrtc==0.50.0
-ultralytics==8.3.200
-av
-aiortc
-aioice
-cryptography
-cffi
-opencv-python-headless>=4.10.0
-numpy>=1.26.4
-Pillow>=10.4.0
-pyzbar>=0.1.9
-openpyxl>=3.1.2
-reportlab>=4.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+fastapi
+numpy
+opencv-python-headless
+pillow
+pyzbar
 qrcode
+torch==2.4.1
+torchvision==0.19.1
+ultralytics
+uvicorn[standard]

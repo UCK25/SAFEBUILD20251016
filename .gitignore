@@ -1,0 +1,17 @@
+.venv/
+runs/
+thumb/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.vscode/
+.DS_Store
+*.pyc
+*.pyo
+*.pyd
+*.sqlite
+*.db
+env/
+venv/
+*.log
+node_modules/

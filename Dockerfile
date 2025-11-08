@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libzbar0 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements_web.txt ./
-RUN pip install --no-cache-dir -r requirements_web.txt
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "web_server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["gunicorn", "flask_server:app", "--bind", "0.0.0.0:8000", "--workers", "1"]

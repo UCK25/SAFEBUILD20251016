@@ -194,7 +194,46 @@ function closeModal(id){ const el = document.getElementById(id); if(!el) return;
 
 if(authBtnDash) authBtnDash.addEventListener('click', ()=>{ openModal('authModal'); const mu = document.getElementById('modal_user'); if(mu) mu.focus(); });
 if(manageBtnDash) manageBtnDash.addEventListener('click', async ()=>{ window.location='/manage'; });
-if(reportBtnDash) reportBtnDash.addEventListener('click', ()=>{ openModal('reportModal'); });
+// Report button: trigger immediate ZIP download (raw CSV + XLSX) when clicked.
+async function downloadReportZip(year, month){
+  try{
+    // build URL with optional year/month
+    let url = '/report/xlsx';
+    const params = new URLSearchParams();
+    if(year) params.set('year', String(year));
+    if(month) params.set('month', String(month));
+    if(Array.from(params).length) url += '?' + params.toString();
+    const resp = await fetch(url, { method: 'GET', credentials: 'include' });
+    if(!resp.ok){
+      try{ const j = await resp.json(); alert('Error generando reporte: '+(j.error||j.message||resp.statusText)); }catch(e){ alert('Error generando reporte: '+resp.statusText); }
+      return;
+    }
+    const cd = resp.headers.get('content-disposition');
+    let filename = 'reporte_bundle.zip';
+    if(cd){
+      const m = cd.match(/filename\*=UTF-8''([^;\n]+)/);
+      if(m && m[1]) filename = decodeURIComponent(m[1]);
+      else{
+        const m2 = cd.match(/filename="?([^";]+)"?/);
+        if(m2 && m2[1]) filename = m2[1];
+      }
+    }
+    const blob = await resp.blob();
+    const urlObj = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = urlObj; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=> URL.revokeObjectURL(urlObj), 5000);
+  }catch(e){ alert('Error descargando reporte: '+e.message); }
+}
+
+if(reportBtnDash) reportBtnDash.addEventListener('click', async ()=>{
+  // if not authenticated, open auth modal first
+  try{
+    const me = await fetch('/api/me', { credentials: 'include' });
+    if(!me.ok){ openModal('authModal'); return; }
+    // authenticated -> start download immediately
+    downloadReportZip();
+  }catch(e){ openModal('authModal'); }
+});
 
 const closeAuth = document.getElementById('closeAuth'); if(closeAuth) closeAuth.addEventListener('click', ()=> closeModal('authModal'));
 const closeManage = document.getElementById('closeManage'); if(closeManage) closeManage.addEventListener('click', ()=> closeModal('manageModal'));
@@ -374,12 +413,13 @@ async function startDashCamera(){
             }
           }catch(e){ /* ignore beep errors */ }
           // if server found a QR in this frame, immediately show it and add to small UI log
-              if(j.qr){
+          if(j.qr){
             try{
               latestQREntry = j.qr;
               lastQSeenTs = Date.now();
               const el = document.getElementById('qrScans');
-              if(el){ const entry = j.qr; const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; const who = entry.user || entry.qr || '(sin texto)'; d.textContent = `${formatLocal(entry.ts)} — ${who}`; el.insertBefore(d, el.firstChild); while(el.childNodes.length > 10) el.removeChild(el.lastChild); }
+              // Only show QR in small UI list when it maps to a user (no placeholders)
+              if(el){ const entry = j.qr; if(entry && entry.user){ const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; d.textContent = `${formatLocal(entry.ts)} — ${entry.user}`; el.insertBefore(d, el.firstChild); while(el.childNodes.length > 10) el.removeChild(el.lastChild); } }
               renderOverlay();
             }catch(e){ console.warn('apply qr immediate', e); }
           } else {
@@ -427,7 +467,8 @@ function renderOverlay(){
   }
   // draw QR overlay if present (green rectangle)
   // Only draw QR overlay when camera/capture is ready to avoid showing stale QR on initial blank screen
-  if(dashReady && latestQREntry && latestQREntry.points && latestQREntry.image_w && latestQREntry.image_h){
+  // Only draw QR overlay when the QR maps to a user (we don't draw for unmapped raw QR)
+  if(dashReady && latestQREntry && latestQREntry.user && latestQREntry.points && latestQREntry.image_w && latestQREntry.image_h){
     try{
       const p = latestQREntry.points; // array of [x,y]
       const imgW = latestQREntry.image_w, imgH = latestQREntry.image_h;
@@ -465,23 +506,22 @@ async function pollLastQR(){
     if(!r.ok) return;
     const j = await r.json();
         if(j && j.ok && j.entry){
-      const entry = j.entry;
-      if(entry.ts !== lastQRTs){
-        lastQRTs = entry.ts;
-        latestQREntry = entry;
-        // add to small UI list (show user if available)
-        const el = document.getElementById('qrScans');
-        if(el){
-              const who = entry.user || entry.qr || '(sin texto)';
-              const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; d.textContent = `${formatLocal(entry.ts)} — ${who}`;
-          el.insertBefore(d, el.firstChild);
-          // keep max 10
-          while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+        const entry = j.entry;
+        if(entry.ts !== lastQRTs){
+          lastQRTs = entry.ts;
+          latestQREntry = entry;
+          // add to small UI list only when entry.user (no placeholders)
+          const el = document.getElementById('qrScans');
+          if(el && entry && entry.user){
+                const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid #123'; d.textContent = `${formatLocal(entry.ts)} — ${entry.user}`;
+            el.insertBefore(d, el.firstChild);
+            // keep max 10
+            while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+          }
+          // re-render overlay to show QR rectangle (overlay will only draw when user present)
+          renderOverlay();
         }
-        // re-render overlay to show QR rectangle
-        renderOverlay();
       }
-    }
   }catch(e){ /* ignore */ }
 }
 setInterval(pollLastQR, 2000);

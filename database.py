@@ -327,10 +327,10 @@ def list_cameras():
     return cameras
 
 # CRUD Incidentes
-def register_incident(camera_name, incident_type, description, user_identified=None, evidence_path=None, dedupe_window_minutes: int = 60):
+def register_incident(camera_name, incident_type, description, user_identified=None, evidence_path=None, dedupe_window_minutes: float = 60.0):
     """
     Registra un incidente en la BD.
-    - Si existe un incidente similar (misma cámara, mismo tipo, mismo usuario) dentro de `dedupe_window_minutes`,
+        - Si existe un incidente similar (misma cámara, mismo tipo, mismo usuario) dentro de `dedupe_window_minutes`,
       actualiza el registro existente incrementando `occurrences` y actualizando `last_seen` / `evidence_path`.
     - Si no existe, inserta un nuevo registro con `occurrences=1`.
     Esto evita contar múltiples registros por la misma situación continuada.
@@ -859,3 +859,126 @@ def generate_report_pdf(output_pdf='reporte_analizado.pdf', time_window_minutes=
     doc.build(story)
     print(f"PDF generado: {output_pdf}")
     return output_pdf
+
+
+def _is_non_wearing_incident(inc):
+    """Heuristic: return True if incident likely corresponds to non-wearing PPE.
+    Checks type and description for keywords like 'sin casco', 'sin chaleco', 'not_helmet', 'not_reflective', 'PPE_violation'.
+    """
+    try:
+        tipo = (inc[2] or '').lower()
+        desc = (inc[4] or '').lower()
+        keywords = ('sin casco', 'sin chaleco', 'not_helmet', 'not_reflective', 'ppe_violation', 'ppe violation', 'sin')
+        for k in keywords:
+            if k in tipo or k in desc:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def generate_monthly_summary_zip(year: int, month: int, output_zip: str = None):
+    """
+    Generate a ZIP containing:
+      - analyzed_daily.csv : for each day of the month, counts of unique users responsible
+          (multiple detections by same user in same day count as one incumplimiento), and list of users.
+      - incidents_raw.csv : raw incidents for the month
+      - README.txt : brief notes about aggregation rules
+
+    Returns path to ZIP.
+    """
+    import zipfile
+    import tempfile
+    import csv
+    from datetime import datetime
+
+    if output_zip is None:
+        output_zip = f'reporte_{year:04d}_{month:02d}_summary.zip'
+
+    incidents = list_incidents()
+    filtered = []
+    for inc in incidents:
+        try:
+            ts = _parse_timestamp(inc[3])
+        except Exception:
+            continue
+        if ts.year != int(year) or ts.month != int(month):
+            continue
+        filtered.append(inc)
+
+    # Raw CSV
+    raw_csv = os.path.splitext(output_zip)[0] + '_incidents_raw.csv'
+    with open(raw_csv, 'w', newline='', encoding='utf-8') as rf:
+        writer = csv.writer(rf)
+        writer.writerow(['ID', 'Cámara', 'Tipo', 'Timestamp', 'Descripción', 'Status', 'Usuario Identificado', 'EvidencePath'])
+        for inc in sorted(filtered, key=lambda r: _parse_timestamp(r[3])):
+            writer.writerow([inc[0], inc[1], inc[2], inc[3], inc[4], inc[5], inc[7], inc[6]])
+
+    # Build per-day unique-user aggregation for non-wearing incidents
+    # day_str -> set(users)
+    from collections import defaultdict
+    day_users = defaultdict(set)
+    day_raw_counts = defaultdict(int)
+
+    for inc in filtered:
+        try:
+            ts = _parse_timestamp(inc[3])
+        except Exception:
+            continue
+        day = ts.strftime('%Y-%m-%d')
+        day_raw_counts[day] += 1
+        # consider only incidents that look like non-wearing
+        if _is_non_wearing_incident(inc):
+            user = (inc[7] or '').strip()
+            if not user:
+                # treat unknown as a special token
+                user = 'unknown'
+            day_users[day].add(user)
+
+    analyzed_csv = os.path.splitext(output_zip)[0] + '_analyzed_daily.csv'
+    with open(analyzed_csv, 'w', newline='', encoding='utf-8') as af:
+        writer = csv.writer(af)
+        writer.writerow(['Date', 'RawIncidents', 'UniqueUsersCount', 'UsersList', 'Incumplimientos'])
+        # iterate days in chronological order
+        for day in sorted(set(list(day_raw_counts.keys()) + list(day_users.keys()))):
+            raw = day_raw_counts.get(day, 0)
+            users = sorted([u for u in day_users.get(day, set()) if u and u != 'unknown'])
+            unknown_present = 'unknown' in day_users.get(day, set())
+            # Incumplimientos: count unique users excluding 'unknown'. If only unknowns present, incumplimientos is 0
+            incumplimientos = len(users)
+            users_list = ', '.join(users)
+            if unknown_present:
+                # indicate unknown occurrences in a separate way
+                if users_list:
+                    users_list = users_list + ', unknown'
+                else:
+                    users_list = 'unknown'
+            writer.writerow([day, raw, len(users), users_list, incumplimientos])
+
+    # README
+    readme = os.path.splitext(output_zip)[0] + '_README.txt'
+    with open(readme, 'w', encoding='utf-8') as r:
+        r.write('Reporte mensual analizado\n')
+        r.write(f'Periodo: {year:04d}-{month:02d}\n')
+        r.write('\n')
+        r.write('Reglas:\n')
+        r.write('- RawIncidents: conteo crudo de registros en la BD para el día.\n')
+        r.write("- UniqueUsersCount / UsersList: usuarios identificados como responsables de incumplimientos de PPE (heurística: 'sin casco','sin chaleco', 'PPE_violation').\n")
+        r.write("  Si un mismo usuario fue detectado varias veces en el mismo día, cuenta como un solo 'Incumplimiento'.\n")
+        r.write("- Incumplimientos: número de usuarios únicos (excluye 'unknown'). 'unknown' se incluye en UsersList if present.\n")
+
+    # Create ZIP
+    with zipfile.ZipFile(output_zip, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(analyzed_csv, arcname=os.path.basename(analyzed_csv))
+        zf.write(raw_csv, arcname=os.path.basename(raw_csv))
+        zf.write(readme, arcname=os.path.basename(readme))
+
+    # cleanup intermediate CSVs (optional) - keep them alongside zip for transparency
+    try:
+        os.remove(analyzed_csv)
+        os.remove(raw_csv)
+        os.remove(readme)
+    except Exception:
+        pass
+
+    return output_zip

@@ -91,15 +91,15 @@ class SafetyMonitorSubject(Subject):
             except Exception:
                 pass
 
-        # イベントの重複チェックをより厳密に行う
+        # Hacer la comprobación de duplicados de eventos más estricta
         key = (event_data.get('alert_type'), event_data.get('camera'), 
                event_data.get('user_identified'), 
-               ','.join(sorted(event_data.get('classes_detected', []))))  # クラスの検出状態も含める
+               ','.join(sorted(event_data.get('classes_detected', []))))  # incluir también el estado de las clases detectadas
         last = self._recent_event_times.get(key)
         DUPLICATE_WINDOW = 3.0  # Mostrar como máximo cada 3 segundos por evento
         if last and (ahora - last) < DUPLICATE_WINDOW:
-            # 直近の通知をスキップ
-            print(f"重複イベントをスキップ: {key}")
+            # Omitir notificaciones muy recientes (duplicadas)
+            print(f"Se omite evento duplicado: {key}")
             return
         # 通知時刻を記録
         self._recent_event_times[key] = ahora
@@ -192,9 +192,9 @@ class SafetyMonitorSubject(Subject):
                 # the outer effective_user unchanged.
                 e_user = effective_user
 
-                # QRコードが検出されている場合は即座にチェック（遅延なし）
+                # Si se detectó un QR, comprobar inmediatamente (sin retraso)
                 if not e_user and any('qr' in c.lower() for c in classes_detected):
-                    # QRマッピングを即座にチェック
+                    # Verificar asignación de QR inmediatamente
                     if isinstance(qr_data, dict):
                         if 'any' in qr_data:
                             e_user = qr_data['any']
@@ -239,17 +239,17 @@ class SafetyMonitorSubject(Subject):
             if not has_vest:
                 violations.append('Falta Chaleco')
             
-            # 各人物の違反に対して1回だけアラートを生成
-            alert_sent = False  # 追跡フラグ
+            # Generar solo una alerta por cada persona con violación
+            alert_sent = False  # bandera de seguimiento
             for violation in violations:
                 if alert_sent:
-                    continue  # 既にアラートを送信済みの場合はスキップ
+                    continue  # si ya se envió una alerta, omitir
                 if effective_user:
                     description = f"{violation} - Usuario identificado: {effective_user}"
                 else:
                     description = f"{violation} - Usuario: unknown"
                 _handle_alert(violation, description)
-                alert_sent = True  # アラート送信済みをマーク
+                alert_sent = True  # marcar como alerta enviada
 
         # No more intrusion detection - we only care about PPE violations
         pass
@@ -359,16 +359,16 @@ class AlertLogger(Observer):
         alert_type = event_data.get('alert_type', '')
         user_ident = event_data.get('user_identified')
 
-        # メッセージの重複チェック用のキー
+    # Clave para verificar duplicados de mensajes
         msg_key = f"{camera}:{alert_type}:{user_ident}"
         current_time = time.time()
 
-        # 2秒以内の同一メッセージはスキップ
+        # Omitir el mismo mensaje si se repite en menos de 2 segundos
         if msg_key in self._last_message:
             if current_time - self._last_message[msg_key] < 2.0:
                 return
 
-        # アラートメッセージの生成
+        # Generación del mensaje de alerta
         msg = None
         color = None
         if alert_type:
@@ -378,17 +378,17 @@ class AlertLogger(Observer):
             msg = f"[{timestamp}] {camera}: Usuario identificado - {user_ident}"
             color = 'cyan'
 
-        # メッセージの表示
+    # Mostrar el mensaje (en widget si existe)
         if msg and self.log_widget:
             color_tag = f"<span style='color: {color};'>"
             if color == 'cyan':
                 color_tag += '[INFO] '
             self.log_widget.append(f"{color_tag}{msg}</span>")
         
-        # 最終表示時刻を更新
+    # Actualizar hora de última muestra
         self._last_message[msg_key] = current_time
 
-        # アラーム音の再生（違反アラートのみ）
+    # Reproducción de sonido de alarma (solo para alertas de violación)
         if alert_type.startswith('Falta'):
             def _play_beep():
                 try:

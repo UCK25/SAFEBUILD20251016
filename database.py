@@ -39,9 +39,22 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             role TEXT DEFAULT 'supervisor',
-            qr_code TEXT UNIQUE
+            qr_code TEXT UNIQUE,
+            email TEXT
         )
     ''')
+
+    # ensure email column exists for older DBs
+    try:
+        cursor.execute("PRAGMA table_info(users)")
+        user_cols = [r[1] for r in cursor.fetchall()]
+        if 'email' not in user_cols:
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            except Exception:
+                pass
+    except Exception:
+        pass
     
     # Tabla Cámaras
     cursor.execute('''
@@ -215,6 +228,20 @@ def get_user_by_id(user_id):
         except Exception:
             pass
 
+
+def get_user_by_username(username):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, role, qr_code, email FROM users WHERE username=?", (username,))
+        user = cursor.fetchone()
+        return user
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 def update_password(user_id, new_password):
     # Backward-compatible update_password with audit logging support
     return reset_user_password(performed_by=None, target_user_id=user_id, new_password=new_password)
@@ -289,6 +316,12 @@ def update_user(user_id, username=None, qr_code=None):
         if qr_code is not None:
             fields.append('qr_code=?')
             params.append(qr_code)
+        # allow updating email as well
+        if 'email' in locals():
+            pass
+        if qr_code is not None:
+            pass
+        # NOTE: email handled by explicit parameter below
         if not fields:
             return False
         params.append(user_id)
@@ -299,6 +332,22 @@ def update_user(user_id, username=None, qr_code=None):
     except sqlite3.IntegrityError:
         # e.g., duplicate username or qr_code
         return False
+    except Exception:
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def update_user_email(user_id, email):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET email=? WHERE id=?", (email, user_id))
+        conn.commit()
+        return True
     except Exception:
         return False
     finally:
@@ -396,6 +445,26 @@ def update_incident(incident_id, status):
     cursor.execute("UPDATE incidents SET status=? WHERE id=?", (status, incident_id))
     conn.commit()
     conn.close()
+
+
+def assign_user_to_incident(incident_id, username):
+    """
+    Assign a username to an incident's user_identified field.
+    Returns True on success, False otherwise.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE incidents SET user_identified=? WHERE id=?", (username, incident_id))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 def update_incident_user_recent(camera_name, incident_type, user_identified, within_seconds: int = 10):
     """

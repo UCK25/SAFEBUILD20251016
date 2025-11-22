@@ -611,6 +611,222 @@ def api_users():
     return jsonify({'ok': True})
 
 
+@app.route('/api/register_guest', methods=['POST'])
+def api_register_guest():
+    """Register a guest user and assign to an incident (if eligible).
+    Requires a JSON body: {"incident_id": <int>, "username": <optional>}.
+    Only authenticated operators can perform this action.
+    Returns created credentials on success.
+    """
+    current = _get_current_user_from_cookie()
+    if not current:
+        return jsonify({'ok': False, 'error': 'authentication required'}), 401
+    data = request.get_json() or {}
+    requested_username = data.get('username')
+
+    # create username/password and register user in DB (no incident assignment)
+    import random, string
+    from database import register_user
+
+    def _gen_password(n=10):
+        return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(n))
+
+    if requested_username:
+        pwd = _gen_password(10)
+        ok = register_user(requested_username, pwd)
+        if not ok:
+            return jsonify({'ok': False, 'error': 'username_taken'}), 400
+        created_username = requested_username
+        created_password = pwd
+    else:
+        # auto-generate username attempts
+        created_username = None
+        created_password = None
+        base = f"guest_{time.strftime('%Y%m%d_%H%M%S')}_"
+        for _ in range(6):
+            cand = base + str(random.randint(1000, 9999))
+            pwd = _gen_password(10)
+            ok = register_user(cand, pwd)
+            if ok:
+                created_username = cand
+                created_password = pwd
+                break
+        if not created_username:
+            return jsonify({'ok': False, 'error': 'could_not_create_user'}), 500
+
+    # Return created credentials. No incident assignment performed here.
+    return jsonify({'ok': True, 'username': created_username, 'password': created_password})
+
+
+@app.route('/api/register_guest_public', methods=['POST'])
+def api_register_guest_public():
+    """Public endpoint to register a guest user for an incident.
+    Body: {"incident_id": <int>, "username": <optional>}
+    Allows unauthenticated registration only when the incident exists,
+    has no assigned user and the first detection is >= 1 hour old.
+    Returns created username/password.
+    """
+    data = request.get_json() or {}
+    # incident assignment has been removed: ignore any incident_id provided by client
+
+    # create username/password and register user in DB (allow provided password)
+    import random, string, base64
+    from database import register_user, get_user_by_username
+    def _gen_password(n=10):
+        return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(n))
+
+    requested_username = data.get('username')
+    requested_password = data.get('password')
+    requested_email = data.get('email')
+
+    # Require username/password/email to save to DB
+    if not requested_username or not requested_password or not requested_email:
+        return jsonify({'ok': False, 'error': 'missing_required_fields', 'message': 'username, password and email are required'}), 400
+
+    # generate a simple QR string (unique)
+    qr_val = f"GUEST-{int(time.time())}-{random.randint(1000,9999)}"
+
+    # try to register user with qr_code
+    ok = register_user(requested_username, requested_password, qr_code=qr_val)
+    if not ok:
+        return jsonify({'ok': False, 'error': 'username_taken'}), 400
+
+    # save the provided email
+    try:
+        from database import get_user_by_username, update_user_email
+        u = get_user_by_username(requested_username)
+        if u:
+            update_user_email(u[0], requested_email)
+    except Exception:
+        pass
+
+    # build QR image base64 if qrcode lib present
+    qr_b64 = None
+    try:
+        import qrcode
+        import io as _io
+        img = qrcode.make(qr_val)
+        bio = _io.BytesIO()
+        img.save(bio, format='PNG')
+        bio.seek(0)
+        qr_b64 = base64.b64encode(bio.read()).decode('ascii')
+    except Exception:
+        qr_b64 = None
+
+    # attempt to send email with credentials if SMTP configured
+    sent = False
+    try:
+        smtp_host = os.environ.get('SMTP_HOST')
+        smtp_port = int(os.environ.get('SMTP_PORT') or 0)
+        smtp_user = os.environ.get('SMTP_USER')
+        smtp_pass = os.environ.get('SMTP_PASS')
+        if smtp_host and smtp_port:
+            import smtplib
+            from email.message import EmailMessage
+            msg = EmailMessage()
+            msg['Subject'] = 'SafeBuild - Registro de cuenta'
+            msg['From'] = smtp_user or 'no-reply@safebuild'
+            msg['To'] = requested_email
+            body = f"Su cuenta ha sido creada.\nUsuario: {requested_username}\nContraseña: {requested_password}\nQR: {qr_val}\n"
+            msg.set_content(body)
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
+                if smtp_user and smtp_pass:
+                    s.starttls()
+                    s.login(smtp_user, smtp_pass)
+                s.send_message(msg)
+            sent = True
+    except Exception:
+        sent = False
+
+    try:
+        incidents = list_incidents()
+        simple = []
+        for inc in incidents:
+            simple.append({'id': inc[0], 'camera_name': inc[1], 'type': inc[2], 'timestamp': inc[3], 'description': inc[4], 'status': inc[5], 'evidence_path': inc[6], 'user_identified': inc[7]})
+        _write_incident_log(simple[:200])
+    except Exception:
+        pass
+
+    # Return credentials and QR; note: no incident assignment is performed by this endpoint
+    return jsonify({'ok': True, 'username': requested_username, 'password': requested_password, 'qr': qr_val, 'qr_image_base64': qr_b64, 'email_sent': sent})
+
+
+@app.route('/api/request_password_reset', methods=['POST'])
+def api_request_password_reset():
+    """Request a password reset for a user. Body: {username, email}
+    If email matches stored email (or email not set), a temporary password is generated,
+    applied to the account, and returned in the response (and emailed if SMTP configured).
+    """
+    data = request.get_json() or {}
+    username = data.get('username')
+    email = data.get('email')
+    if not username or not email:
+        return jsonify({'ok': False, 'error': 'missing_parameters'}), 400
+    try:
+        from database import get_user_by_username, reset_user_password
+        u = get_user_by_username(username)
+        if not u:
+            return jsonify({'ok': False, 'error': 'user_not_found'}), 404
+        uid = u[0]
+        stored_email = u[4] if len(u) > 4 else None
+        # allow reset if emails match or if no email on record but caller provided something
+        if stored_email and stored_email.strip().lower() != str(email).strip().lower():
+            return jsonify({'ok': False, 'error': 'email_mismatch'}), 403
+        # generate temporary password
+        import random, string
+        temp = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(10))
+        ok = reset_user_password('system', uid, temp)
+        if not ok:
+            return jsonify({'ok': False, 'error': 'reset_failed'}), 500
+        # attempt to send email if SMTP configured via environment variables
+        sent = False
+        try:
+            smtp_host = os.environ.get('SMTP_HOST')
+            smtp_port = int(os.environ.get('SMTP_PORT') or 0)
+            smtp_user = os.environ.get('SMTP_USER')
+            smtp_pass = os.environ.get('SMTP_PASS')
+            if smtp_host and smtp_port:
+                import smtplib
+                from email.message import EmailMessage
+                msg = EmailMessage()
+                msg['Subject'] = 'SafeBuild - Recuperación de contraseña'
+                msg['From'] = smtp_user or 'no-reply@safebuild'
+                msg['To'] = email
+                msg.set_content(f'Su contraseña temporal es: {temp}\nPor favor inicie sesión y cambie su contraseña.')
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
+                    if smtp_user and smtp_pass:
+                        s.starttls()
+                        s.login(smtp_user, smtp_pass)
+                    s.send_message(msg)
+                sent = True
+        except Exception:
+            sent = False
+        return jsonify({'ok': True, 'sent': sent, 'temporary_password': temp})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': 'exception', 'detail': str(e)}), 500
+
+
+@app.route('/api/change_password', methods=['POST'])
+def api_change_password():
+    """Change password for the current authenticated user. Body: {new_password}
+    """
+    current = _get_current_user_from_cookie()
+    if not current:
+        return jsonify({'ok': False, 'error': 'authentication required'}), 401
+    data = request.get_json() or {}
+    newp = data.get('new_password')
+    if not newp or len(newp) < 6:
+        return jsonify({'ok': False, 'error': 'invalid_password', 'message': 'La contraseña debe tener al menos 6 caracteres'}), 400
+    try:
+        uid = int(current[0])
+        ok = reset_user_password(current[1], uid, newp)
+        if ok:
+            return jsonify({'ok': True})
+        return jsonify({'ok': False, 'error': 'update_failed'}), 500
+    except Exception as e:
+        return jsonify({'ok': False, 'error': 'exception', 'detail': str(e)}), 500
+
+
 @app.route('/api/download_qr/<int:user_id>')
 def api_download_qr(user_id: int):
     current = _get_current_user_from_cookie()

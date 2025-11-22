@@ -3,162 +3,594 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SafeBuild - Gestionar Usuarios</title>
+  <title>SafeBuild - Gestión de Usuarios</title>
   <style>
-    body { background:#071023; color:#e6eef8; font-family:Arial, sans-serif; }
-    .container { max-width:1100px; margin:16px auto; }
-    table { width:100%; border-collapse:collapse; margin-top:8px }
-    th, td { padding:8px; border-bottom:1px solid #123; text-align:left }
-    th { background:#091428 }
-    button { padding:6px 10px; margin-right:6px }
-    .top { display:flex; gap:8px; align-items:center }
+    :root {
+      --primary: #071023;
+      --secondary: #0d1c3a;
+      --accent: #2a7de1;
+      --accent-hover: #1c6bc5;
+      --text: #e6eef8;
+      --text-secondary: #b4c7e7;
+      --danger: #e74c3c;
+      --warning: #f39c12;
+      --success: #2ecc71;
+      --border: #1a3357;
+      --card-bg: #0a1529;
+      --input-bg: #0f2244;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body { 
+      background: var(--primary); 
+      color: var(--text); 
+      font-family: 'Segoe UI', Arial, sans-serif;
+      line-height: 1.6;
+    }
+    
+    .container { 
+      max-width: 1200px; 
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+    
+    /* Header Styles */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 24px 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 32px;
+    }
+    
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .logo h1 {
+      font-size: 1.8rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+    }
+    
+    /* Button Styles */
+    .btn {
+      padding: 10px 18px;
+      border: none;
+      border-radius: 6px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.95rem;
+    }
+    
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+    
+    .btn-secondary {
+      background: var(--secondary);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    
+    .btn-secondary:hover {
+      background: #132a50;
+    }
+    
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background: #c0392b;
+    }
+    
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 0.85rem;
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    /* Main Layout */
+    .dashboard-layout {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 30px;
+      margin-bottom: 40px;
+    }
+    
+    /* Users Table Section */
+    .users-section {
+      background: var(--card-bg);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+    }
+    
+    .section-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .section-header h2 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    
+    .section-subtitle {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+    }
+    
+    .table-container {
+      overflow-x: auto;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    
+    th, td {
+      padding: 14px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    th {
+      background: var(--secondary);
+      font-weight: 600;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    tr:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+    
+    .role-badge {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    
+    .role-admin {
+      background: rgba(231, 76, 60, 0.2);
+      color: var(--danger);
+    }
+    
+    .role-supervisor {
+      background: rgba(243, 156, 18, 0.2);
+      color: var(--warning);
+    }
+    
+    .role-guest {
+      background: rgba(46, 204, 113, 0.2);
+      color: var(--success);
+    }
+    
+    .actions-cell {
+      display: flex;
+      gap: 8px;
+    }
+    
+    /* Create User Form */
+    .create-user-section {
+      background: var(--card-bg);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+      height: fit-content;
+      position: sticky;
+      top: 20px;
+    }
+    
+    .form-container {
+      padding: 20px;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+    
+    input, select {
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    
+    .form-footer {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+    
+    /* Empty State */
+    .empty-state {
+      padding: 40px 20px;
+      text-align: center;
+      color: var(--text-secondary);
+    }
+    
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .dashboard-layout {
+        grid-template-columns: 1fr;
+        gap: 24px;
+      }
+      
+      .create-user-section {
+        position: static;
+      }
+    }
+    
+    @media (max-width: 768px) {
+      .header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      
+      .actions-cell {
+        flex-direction: column;
+      }
+      
+      .btn-sm {
+        width: 100%;
+        justify-content: center;
+      }
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="top">
-      <h1>Gestionar Usuarios</h1>
-      <div style="margin-left:auto">
-        <button id="backBtn">Volver</button>
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <div class="logo-icon">SB</div>
+        <h1>Gestión de Usuarios</h1>
       </div>
-    </div>
+      <button id="backBtn" class="btn btn-secondary">Volver al Dashboard</button>
+    </header>
 
-    <div style="display:flex; gap:12px; align-items:flex-start;">
-      <div style="flex:2">
-        <h3>Usuarios</h3>
-        <table id="usersTable">
-          <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>QR</th><th>Acciones</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <div style="width:360px;">
-        <h3>Crear Usuario</h3>
-        <div style="background:#081428;padding:12px;border-radius:6px">
-          <label>Usuario<br><input id="new_username" style="width:100%"/></label><br><br>
-          <label>Contraseña<br><input id="new_password" type="password" style="width:100%"/></label><br><br>
-          <label>Rol<br>
-            <select id="new_role" style="width:100%">
-              <option value="guest">guest</option>
-              <option value="supervisor">supervisor</option>
-              <option value="admin">admin</option>
-            </select>
-          </label><br><br>
-          <label>QR (opcional)<br><input id="new_qr" style="width:100%"/></label><br><br>
-          <div style="text-align:right"><button id="createBtn">Crear</button></div>
+    <!-- Main Content -->
+    <div class="dashboard-layout">
+      <!-- Users Table -->
+      <section class="users-section">
+        <div class="section-header">
+          <h2>Usuarios del Sistema</h2>
+          <p class="section-subtitle">Gestione los usuarios y sus permisos en el sistema</p>
         </div>
-      </div>
+        <div class="table-container">
+          <table id="usersTable">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Usuario</th>
+                <th>Rol</th>
+                <th>QR</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="5" class="empty-state">Cargando usuarios...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Create User Form -->
+      <section class="create-user-section">
+        <div class="section-header">
+          <h2>Crear Usuario</h2>
+          <p class="section-subtitle">Agregar nuevo usuario al sistema</p>
+        </div>
+        <div class="form-container">
+          <div class="form-group">
+            <label for="new_username">Usuario</label>
+            <input id="new_username" placeholder="Nombre de usuario" />
+          </div>
+          <div class="form-group">
+            <label for="new_password">Contraseña</label>
+            <input id="new_password" type="password" placeholder="Contraseña" />
+          </div>
+          <div class="form-group">
+            <label for="new_role">Rol</label>
+            <select id="new_role">
+              <option value="guest">Invitado</option>
+              <option value="supervisor">Supervisor</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="new_qr">Código QR (opcional)</label>
+            <input id="new_qr" placeholder="Código QR personalizado" />
+          </div>
+          <div class="form-footer">
+            <button id="createBtn" class="btn btn-primary">Crear Usuario</button>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 
-<script>
-let currentUser = null;
-document.getElementById('backBtn').addEventListener('click', ()=>{ window.location='/dashboard'; });
-
-async function fetchUsers(){
-  const tbody = document.querySelector('#usersTable tbody'); tbody.innerHTML='';
-  try{
-  const res = await fetch('/api/users', { credentials: 'include' });
-    if(!res.ok){
-      tbody.innerHTML = '<tr><td colspan="5">No autorizado. Autentique para ver usuarios.</td></tr>';
-      return;
-    }
-    const data = await res.json();
-    if(!data || !data.length){
-      tbody.innerHTML = '<tr><td colspan="5">No hay usuarios o no tiene permisos para verlos.</td></tr>';
-      return;
-    }
-    data.forEach(u=>{
-      const tr = document.createElement('tr');
-      const masked = '********';
-      tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>${masked}</td>`;
-      const actions = document.createElement('td');
-  const dl = document.createElement('button'); dl.textContent='Descargar QR'; dl.onclick = async ()=>{ try{ const resp = await fetch(`/api/download_qr/${u.id}`, { credentials: 'include' }); if(!resp.ok) return alert('No permitido'); const blob = await resp.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download=`${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove(); }catch(e){ alert(e.message) } };
-      actions.appendChild(dl);
-      // edit username/qr if permissions (admin or supervisor or self)
-      const curRole = (currentUser||{}).role || '';
-      if(currentUser && (parseInt(currentUser.id) === parseInt(u.id) || ['admin','supervisor'].includes(curRole))){
-        const edit = document.createElement('button'); edit.textContent='Editar'; edit.onclick = ()=>{ editUser(u); };
-        actions.appendChild(edit);
-      }
-      // delete button following rules: admin can delete non-admins, supervisor can delete guests, cannot delete self
-      let canDelete = false;
-      if(currentUser){
-        const curId = parseInt(currentUser.id);
-        const curRoleLow = (currentUser.role||'').toLowerCase();
-        if(curId !== parseInt(u.id)){
-          if(curRoleLow === 'admin' && (u.role||'').toLowerCase() !== 'admin') canDelete = true;
-          if(curRoleLow === 'supervisor' && (u.role||'').toLowerCase() === 'guest') canDelete = true;
-        }
-      }
-      if(canDelete){
-        const del = document.createElement('button'); del.textContent='Eliminar'; del.style.background='#8b2c2c'; del.onclick = ()=>{ if(confirm('Eliminar usuario '+u.username+'?')) deleteUser(u); };
-        actions.appendChild(del);
-      }
-      tr.appendChild(actions);
-      tbody.appendChild(tr);
+  <script>
+    let currentUser = null;
+    
+    document.getElementById('backBtn').addEventListener('click', ()=>{ 
+      window.location='/dashboard'; 
     });
-  }catch(e){
-    tbody.innerHTML = '<tr><td colspan="5">Error al recuperar usuarios.</td></tr>';
-    console.warn('fetchUsers error', e);
-  }
-}
 
-function editUser(u){
-  const newName = prompt('Nuevo username', u.username); if(newName===null) return;
-  const newQr = prompt('QR (dejar en blanco para no cambiar)', '')
-  const body = { username: newName };
-  if(newQr !== null && newQr !== '') body.qr_code = newQr;
-  fetch('/api/users/'+u.id, { method:'PUT', credentials: 'include', headers:{'content-type':'application/json'}, body: JSON.stringify(body) }).then(async r=>{ if(!r.ok){ const txt = await r.text(); alert('Error: '+txt); } else { alert('Actualizado'); fetchUsers(); } });
-}
+    async function fetchUsers(){
+      const tbody = document.querySelector('#usersTable tbody'); 
+      tbody.innerHTML='';
+      
+      try{
+        const res = await fetch('/api/users', { credentials: 'include' });
+        if(!res.ok){
+          tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No autorizado. Autentique para ver usuarios.</td></tr>';
+          return;
+        }
+        
+        const data = await res.json();
+        if(!data || !data.length){
+          tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay usuarios o no tiene permisos para verlos.</td></tr>';
+          return;
+        }
+        
+        data.forEach(u=>{
+          const tr = document.createElement('tr');
+          const masked = '********';
+          
+          // Create role badge
+          const roleBadge = document.createElement('span');
+          roleBadge.className = `role-badge role-${u.role}`;
+          roleBadge.textContent = u.role;
+          
+          tr.innerHTML = `
+            <td>${u.id}</td>
+            <td><strong>${u.username}</strong></td>
+            <td></td>
+            <td>${masked}</td>
+            <td class="actions-cell"></td>
+          `;
+          
+          // Add role badge to the cell
+          tr.cells[2].appendChild(roleBadge);
+          
+          const actions = tr.cells[4];
+          
+          // Download QR button
+          const dl = document.createElement('button'); 
+          dl.className = 'btn btn-secondary btn-sm';
+          dl.textContent = 'Descargar QR';
+          dl.onclick = async ()=>{ 
+            try{ 
+              const resp = await fetch(`/api/download_qr/${u.id}`, { credentials: 'include' }); 
+              if(!resp.ok) return alert('No permitido'); 
+              const blob = await resp.blob(); 
+              const a = document.createElement('a'); 
+              a.href = URL.createObjectURL(blob); 
+              a.download = `${u.username}_qr.png`; 
+              document.body.appendChild(a); 
+              a.click(); 
+              a.remove(); 
+            } catch(e){ 
+              alert(e.message) 
+            } 
+          };
+          actions.appendChild(dl);
+          
+          // Edit button if permissions (admin or supervisor or self)
+          const curRole = (currentUser||{}).role || '';
+          if(currentUser && (parseInt(currentUser.id) === parseInt(u.id) || ['admin','supervisor'].includes(curRole))){
+            const edit = document.createElement('button'); 
+            edit.className = 'btn btn-secondary btn-sm';
+            edit.textContent = 'Editar'; 
+            edit.onclick = ()=>{ editUser(u); };
+            actions.appendChild(edit);
+          }
+          
+          // Delete button following rules: admin can delete non-admins, supervisor can delete guests, cannot delete self
+          let canDelete = false;
+          if(currentUser){
+            const curId = parseInt(currentUser.id);
+            const curRoleLow = (currentUser.role||'').toLowerCase();
+            if(curId !== parseInt(u.id)){
+              if(curRoleLow === 'admin' && (u.role||'').toLowerCase() !== 'admin') canDelete = true;
+              if(curRoleLow === 'supervisor' && (u.role||'').toLowerCase() === 'guest') canDelete = true;
+            }
+          }
+          
+          if(canDelete){
+            const del = document.createElement('button'); 
+            del.className = 'btn btn-danger btn-sm';
+            del.textContent = 'Eliminar'; 
+            del.onclick = ()=>{ 
+              if(confirm(`¿Está seguro de eliminar al usuario "${u.username}"? Esta acción no se puede deshacer.`)) 
+                deleteUser(u); 
+            };
+            actions.appendChild(del);
+          }
+          
+          tbody.appendChild(tr);
+        });
+      } catch(e){
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Error al recuperar usuarios.</td></tr>';
+        console.warn('fetchUsers error', e);
+      }
+    }
 
-async function createUser(){
-  const username = document.getElementById('new_username').value.trim();
-  const password = document.getElementById('new_password').value;
-  const role = document.getElementById('new_role').value;
-  const qr = document.getElementById('new_qr').value.trim() || null;
-  if(!username || !password) return alert('username y password son requeridos');
-  try{
-    const res = await fetch('/api/users', { method:'POST', credentials:'include', headers:{'content-type':'application/json'}, body: JSON.stringify({username, password, role, qr_code: qr}) });
-    if(!res.ok){ const t = await res.text(); return alert('Error: '+t); }
-    alert('Usuario creado');
-    document.getElementById('new_username').value=''; document.getElementById('new_password').value=''; document.getElementById('new_qr').value='';
-    fetchUsers();
-  }catch(e){ alert(e.message || e); }
-}
+    function editUser(u){
+      const newName = prompt('Nuevo nombre de usuario', u.username); 
+      if(newName === null) return;
+      
+      const newQr = prompt('Código QR (dejar en blanco para no cambiar)', '');
+      const body = { username: newName };
+      
+      if(newQr !== null && newQr !== '') body.qr_code = newQr;
+      
+      fetch('/api/users/'+u.id, { 
+        method: 'PUT', 
+        credentials: 'include', 
+        headers: { 'content-type': 'application/json' }, 
+        body: JSON.stringify(body) 
+      }).then(async r => { 
+        if(!r.ok){ 
+          const txt = await r.text(); 
+          alert('Error: ' + txt); 
+        } else { 
+          alert('Usuario actualizado correctamente'); 
+          fetchUsers(); 
+        } 
+      });
+    }
 
-async function deleteUser(u){
-  try{
-    const res = await fetch('/api/users/'+u.id, { method:'DELETE', credentials:'include' });
-    if(!res.ok){ const t = await res.text(); return alert('Error: '+t); }
-    alert('Eliminado');
-    fetchUsers();
-  }catch(e){ alert(e.message || e); }
-}
+    async function createUser(){
+      const username = document.getElementById('new_username').value.trim();
+      const password = document.getElementById('new_password').value;
+      const role = document.getElementById('new_role').value;
+      const qr = document.getElementById('new_qr').value.trim() || null;
+      
+      if(!username || !password) {
+        alert('Nombre de usuario y contraseña son requeridos');
+        return;
+      }
+      
+      try{
+        const res = await fetch('/api/users', { 
+          method: 'POST', 
+          credentials: 'include', 
+          headers: { 'content-type': 'application/json' }, 
+          body: JSON.stringify({ username, password, role, qr_code: qr }) 
+        });
+        
+        if(!res.ok){ 
+          const t = await res.text(); 
+          return alert('Error: ' + t); 
+        }
+        
+        alert('Usuario creado exitosamente');
+        
+        // Clear form
+        document.getElementById('new_username').value = '';
+        document.getElementById('new_password').value = '';
+        document.getElementById('new_qr').value = '';
+        
+        // Refresh users list
+        fetchUsers();
+      } catch(e){ 
+        alert(e.message || e); 
+      }
+    }
 
-// QR / mapping UI removed: this functionality is internal and intentionally not exposed in the Gestionar UI.
+    async function deleteUser(u){
+      try{
+        const res = await fetch('/api/users/'+u.id, { 
+          method: 'DELETE', 
+          credentials: 'include' 
+        });
+        
+        if(!res.ok){ 
+          const t = await res.text(); 
+          return alert('Error: ' + t); 
+        }
+        
+        alert('Usuario eliminado correctamente');
+        fetchUsers();
+      } catch(e){ 
+        alert(e.message || e); 
+      }
+    }
 
-// init
-async function init(){
-  try{
-    const me = await fetch('/api/me', { credentials: 'include' });
-    if(me.ok){ const jd = await me.json(); if(jd.ok) currentUser = jd.user; }
-  }catch(e){ /* ignore */ }
-  // adjust role select availability: supervisors cannot create admin
-  if(currentUser && (currentUser.role||'').toLowerCase() === 'supervisor'){
-    const opt = document.querySelector('#new_role option[value="admin"]'); if(opt) opt.disabled = true;
-  }
-  // hide create panel for guests or unauthenticated
-  if(!currentUser || (currentUser.role||'').toLowerCase() === 'guest'){
-    document.getElementById('createBtn').disabled = true;
-    document.getElementById('new_username').disabled = true;
-    document.getElementById('new_password').disabled = true;
-    document.getElementById('new_role').disabled = true;
-    document.getElementById('new_qr').disabled = true;
-  }
-  document.getElementById('createBtn').addEventListener('click', createUser);
-  fetchUsers();
-}
-init();
-</script>
+    // Initialize page
+    async function init(){
+      try{
+        const me = await fetch('/api/me', { credentials: 'include' });
+        if(me.ok){ 
+          const jd = await me.json(); 
+          if(jd.ok) currentUser = jd.user; 
+        }
+      } catch(e){ 
+        // Ignore errors
+      }
+      
+      // Adjust role select availability: supervisors cannot create admin
+      if(currentUser && (currentUser.role||'').toLowerCase() === 'supervisor'){
+        const opt = document.querySelector('#new_role option[value="admin"]'); 
+        if(opt) opt.disabled = true;
+      }
+      
+      // Hide create panel for guests or unauthenticated
+      if(!currentUser || (currentUser.role||'').toLowerCase() === 'guest'){
+        document.getElementById('createBtn').disabled = true;
+        document.getElementById('new_username').disabled = true;
+        document.getElementById('new_password').disabled = true;
+        document.getElementById('new_role').disabled = true;
+        document.getElementById('new_qr').disabled = true;
+        document.getElementById('createBtn').textContent = 'Sin permisos';
+      }
+      
+      document.getElementById('createBtn').addEventListener('click', createUser);
+      fetchUsers();
+    }
+    
+    init();
+  </script>
 </body>
 </html>

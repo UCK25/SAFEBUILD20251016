@@ -485,19 +485,20 @@
       
       if(newQr !== null && newQr !== '') body.qr_code = newQr;
       
-      fetch('/api/users/'+u.id, { 
-        method: 'PUT', 
-        credentials: 'include', 
-        headers: { 'content-type': 'application/json' }, 
-        body: JSON.stringify(body) 
-      }).then(async r => { 
-        if(!r.ok){ 
-          const txt = await r.text(); 
-          alert('Error: ' + txt); 
-        } else { 
-          alert('Usuario actualizado correctamente'); 
-          fetchUsers(); 
-        } 
+      fetch('/api/users', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(Object.assign({ id: u.id }, body))
+      }).then(async r => {
+        if(!r.ok){
+          let txt = '';
+          try{ txt = await r.text(); }catch(e){}
+          alert('Error: ' + (txt || r.statusText));
+        } else {
+          alert('Usuario actualizado correctamente');
+          fetchUsers();
+        }
       });
     }
 

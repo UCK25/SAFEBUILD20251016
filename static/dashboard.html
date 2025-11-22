@@ -601,6 +601,20 @@
     </div>
   </div>
 
+  <!-- Resultado de registro público (modal persistente hasta X) -->
+  <div id="publicRegisterResultModal" class="modal">
+    <div class="modal-header">
+      <h3>Registro Creado</h3>
+      <button id="closePublicResult" class="close-btn">✕</button>
+    </div>
+    <div class="modal-body" id="publicRegisterResultBody">
+      <!-- Contenido dinámico: usuario, contraseña, QR image -->
+    </div>
+    <div class="modal-footer">
+      <button id="publicRegisterResultCloseBtn" class="btn btn-secondary">Cerrar</button>
+    </div>
+  </div>
+
   <!-- Los demás modales (passwordResetModal, changePasswordModal, publicRegisterModal, manageModal, reportModal) 
        mantienen la misma estructura pero con las clases CSS actualizadas -->
 
@@ -661,6 +675,7 @@
 
       // Modal close clicks
       const closeAuth = document.getElementById('closeAuth'); if(closeAuth) closeAuth.addEventListener('click', ()=> closeModal(authModal));
+      const closePublic = document.getElementById('closePublicRegister'); if(closePublic) closePublic.addEventListener('click', ()=> closeModal(publicModal));
       if(overlay) overlay.addEventListener('click', ()=>{ closeModal(authModal); closeModal(publicModal); });
 
       // Login handler
@@ -679,6 +694,73 @@
           }catch(e){ alert('Error en login: '+e.message); }
         });
       }
+
+      // Forgot password link (simple prompt flow)
+      const forgotPwdLink = document.getElementById('forgotPwdLink');
+      if(forgotPwdLink){
+        forgotPwdLink.addEventListener('click', async (ev)=>{
+          ev.preventDefault();
+          const user = prompt('Ingrese su nombre de usuario para solicitar recuperación:');
+          if(!user) return alert('Usuario requerido');
+          const email = prompt('Ingrese su email registrado:');
+          if(!email) return alert('Email requerido');
+          try{
+            const r = await fetch('/api/request_password_reset', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username: user, email: email }) });
+            if(!r.ok){ try{ const j = await r.json(); alert('Error: '+(j.error||j.message||r.statusText)); }catch(e){ alert('Error solicitando recuperación'); } return; }
+            const j = await r.json();
+            if(j && j.ok){
+              alert('Si el usuario y email son correctos, se ha enviado un correo con instrucciones para recuperar la contraseña.');
+            } else {
+              alert('No se pudo generar recuperación: '+(j.error||j.message||'unknown'));
+            }
+          }catch(e){ alert('Error solicitando recuperación: '+e.message); }
+        });
+      }
+      // Public register submit
+      const publicSubmit = document.getElementById('publicRegisterSubmitBtn');
+      if(publicSubmit){
+        publicSubmit.addEventListener('click', async ()=>{
+          const uel = document.getElementById('public_reg_user');
+          const pel = document.getElementById('public_reg_pass');
+          const eel = document.getElementById('public_reg_email');
+          const msg = document.getElementById('publicRegisterMsg');
+          const result = document.getElementById('publicRegisterResult');
+          if(msg) { msg.style.display = 'none'; msg.textContent = ''; }
+          if(result) { result.innerHTML = ''; }
+          const u = uel ? (uel.value || '').trim() : '';
+          const p = pel ? (pel.value || '').trim() : '';
+          const e = eel ? (eel.value || '').trim() : '';
+          if(!u || !p || !e){ if(msg){ msg.style.display='block'; msg.textContent='Usuario, contraseña y email son requeridos'; } return; }
+          try{
+            publicSubmit.disabled = true;
+            const resp = await fetch('/api/register_guest_public', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ username: u, password: p, email: e }) });
+            if(!resp.ok){ try{ const j = await resp.json(); if(msg){ msg.style.display='block'; msg.textContent = j.message || j.error || resp.statusText; } }catch(er){ if(msg){ msg.style.display='block'; msg.textContent = 'Error en el servidor'; } } publicSubmit.disabled = false; return; }
+            const j = await resp.json();
+            if(j && j.ok){
+              // Populate the persistent result modal and open it (user must close manually)
+              const body = document.getElementById('publicRegisterResultBody');
+              if(body){
+                let html = `<div>Usuario creado: <strong>${j.username}</strong></div>`;
+                html += `<div>Contraseña: <strong>${j.password}</strong></div>`;
+                if(j.qr_image_base64){ html += `<div style="margin-top:8px"><img src="data:image/png;base64,${j.qr_image_base64}" alt="QR" style="max-width:260px;border-radius:4px;border:1px solid var(--border)"/></div>`; }
+                body.innerHTML = html;
+              }
+              openModal(document.getElementById('publicRegisterResultModal'));
+              // clear inputs but keep original register modal open if operator wants to create more
+              if(uel) uel.value=''; if(pel) pel.value=''; if(eel) eel.value='';
+            } else {
+              if(msg){ msg.style.display='block'; msg.textContent = j.error || 'Error creando cuenta'; }
+            }
+          }catch(e2){ if(msg){ msg.style.display='block'; msg.textContent = 'Error: '+e2.message; } }
+          finally{ publicSubmit.disabled = false; }
+        });
+      }
+      // Result modal close handlers
+      const closePublicResult = document.getElementById('closePublicResult');
+      const publicResultCloseBtn = document.getElementById('publicRegisterResultCloseBtn');
+      const publicResultModal = document.getElementById('publicRegisterResultModal');
+      if(closePublicResult) closePublicResult.addEventListener('click', ()=> closeModal(publicResultModal));
+      if(publicResultCloseBtn) publicResultCloseBtn.addEventListener('click', ()=> closeModal(publicResultModal));
 
       // fetch incidents (render list similar to old behavior)
       async function fetchIncidents(){
@@ -725,7 +807,24 @@
           const data = await res.json(); const tbody = document.querySelector('#usersTable tbody'); if(!tbody) return; tbody.innerHTML = '';
           if(!window.currentUser){ const tr = document.createElement('tr'); tr.innerHTML = `<td colspan="5" style="text-align:center;padding:20px">Autenticar para ver usuarios.</td>`; tbody.appendChild(tr); return; }
           const allowed = ['admin','supervisor']; let visible = data; if(!allowed.includes(window.currentUser.role)){ visible = data.filter(u => u.username === window.currentUser.username); }
-          visible.forEach(u=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>********</td><td></td>`; const btnTd = tr.querySelector('td:last-child'); const dl = document.createElement('button'); dl.textContent='Descargar QR'; dl.className='btn btn-secondary'; dl.onclick = async ()=>{ try{ const resp = await fetch(`/api/download_qr/${u.id}`, { credentials:'include' }); if(!resp.ok){ alert('No permitido o error'); return; } const blob = await resp.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove(); }catch(e){ alert('Error: '+e.message) } }; btnTd.appendChild(dl); tbody.appendChild(tr); });
+          visible.forEach(u=>{
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>********</td><td></td>`;
+            const btnTd = tr.querySelector('td:last-child');
+            // Download QR only on dashboard
+            const dl = document.createElement('button');
+            dl.textContent='Descargar QR';
+            dl.className='btn btn-secondary';
+            dl.onclick = async ()=>{
+              try{
+                const resp = await fetch(`/api/download_qr/${u.id}`, { credentials:'include' });
+                if(!resp.ok){ alert('No permitido o error'); return; }
+                const blob = await resp.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${u.username}_qr.png`; document.body.appendChild(a); a.click(); a.remove();
+              }catch(e){ alert('Error: '+e.message) }
+            };
+            btnTd.appendChild(dl);
+            tbody.appendChild(tr);
+          });
         }catch(e){ console.warn('fetchUsers error', e); }
       }
 
@@ -737,6 +836,7 @@
       if(registerTopBtn) registerTopBtn.addEventListener('click', ()=>{ openModal(publicModal); });
 
       // --- Dashboard camera + overlay logic (single live view, draw boxes from /detect_json) ---
+      // (model-status badge removed by request)
       let dashStream = null;
       let dashCaptureCanvas = null;
       let dashCaptureCtx = null;
@@ -776,9 +876,23 @@
               if(j && j.ok){
                 // draw boxes
                 latestDetections = j.boxes || [];
+                // Update QR state only when server reports one; clear when none to avoid stale green boxes
+                if(j.qr){
+                  latestQREntry = j.qr;
+                  lastQSeenTs = Date.now();
+                  const el = document.getElementById('qrScans');
+                  if(el && j.qr){
+                    const d = document.createElement('div');
+                    d.style.padding='6px'; d.style.borderBottom='1px solid var(--border)';
+                    d.textContent = `Usuario: ${j.qr.user || j.qr.qr || 'unknown'} Tiempo: ${formatLocal(j.qr.ts)}`;
+                    el.insertBefore(d, el.firstChild);
+                    while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+                  }
+                } else {
+                  latestQREntry = null;
+                }
                 renderOverlayLocal();
                 try{ if(Array.isArray(j.boxes) && j.boxes.some(b => (b.label||'').toLowerCase().includes('sin'))){ playBeep(); } }catch(e){}
-                if(j.qr){ latestQREntry = j.qr; lastQSeenTs = Date.now(); const el = document.getElementById('qrScans'); if(el && j.qr && j.qr.user){ const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid var(--border)'; d.textContent = `${formatLocal(j.qr.ts)} — ${j.qr.user}`; el.insertBefore(d, el.firstChild); while(el.childNodes.length > 10) el.removeChild(el.lastChild); } renderOverlayLocal(); }
               }
             }catch(e){ /* ignore frame errors */ }
           }, 300);
@@ -787,8 +901,59 @@
 
       function stopDashCamera(){ if(dashInterval) clearInterval(dashInterval); dashInterval = null; if(dashStream){ dashStream.getTracks().forEach(t=>t.stop()); dashStream = null; } }
 
-      function renderOverlayLocal(){ if(!overlayCtx) return; overlayCtx.clearRect(0,0,overlayCanvasEl.width, overlayCanvasEl.height); try{ if(Array.isArray(latestDetections)){ latestDetections.forEach(b=>{ try{ const x1 = Math.max(0, b.x1), y1 = Math.max(0, b.y1), x2 = Math.min(overlayCanvasEl.width, b.x2), y2 = Math.min(overlayCanvasEl.height, b.y2); const w = x2 - x1, h = y2 - y1; if(w<30||h<30) return; const label = b.label||''; const isMissing = label && label.includes('sin'); const color = isMissing ? 'rgba(255,0,0,0.95)' : 'rgba(0,255,0,0.95)'; const baseLine = Math.max(3, Math.floor(overlayCanvasEl.width/250)); overlayCtx.strokeStyle = color; overlayCtx.lineWidth = isMissing ? Math.max(4, Math.floor(baseLine*1.8)) : baseLine; overlayCtx.strokeRect(x1,y1,w,h); overlayCtx.fillStyle = color; overlayCtx.font = Math.max(12, Math.floor(overlayCanvasEl.width/80)) + 'px Arial'; overlayCtx.fillText(label, x1+6, Math.max(18, y1+20)); }catch(e){} }); }
-        if(dashReady && latestQREntry && latestQREntry.user && latestQREntry.points && latestQREntry.image_w && latestQREntry.image_h){ try{ const p = latestQREntry.points; const imgW = latestQREntry.image_w, imgH = latestQREntry.image_h; if(imgW && imgH){ const scaleX = overlayCanvasEl.width / imgW, scaleY = overlayCanvasEl.height / imgH; let xs = p.map(pt=>pt[0]); let ys = p.map(pt=>pt[1]); const x1 = Math.max(0, Math.min(...xs) * scaleX); const y1 = Math.max(0, Math.min(...ys) * scaleY); const x2 = Math.min(overlayCanvasEl.width, Math.max(...xs) * scaleX); const y2 = Math.min(overlayCanvasEl.height, Math.max(...ys) * scaleY); const w = x2-x1, h = y2-y1; if(w>8 && h>8){ overlayCtx.strokeStyle='rgba(0,200,80,0.95)'; overlayCtx.lineWidth = Math.max(4, Math.floor(overlayCanvasEl.width/220)); overlayCtx.strokeRect(x1,y1,w,h); overlayCtx.fillStyle='rgba(0,200,80,0.95)'; overlayCtx.font = Math.max(12, Math.floor(overlayCanvasEl.width/90)) + 'px Arial'; const who = (latestQREntry.user || latestQREntry.qr) ? (latestQREntry.user || latestQREntry.qr) : ''; overlayCtx.fillText('User: '+who, x1+6, Math.max(18, y1+18)); } } }catch(e){} }
+      function renderOverlayLocal(){
+        if(!overlayCtx) return; overlayCtx.clearRect(0,0,overlayCanvasEl.width, overlayCanvasEl.height);
+        try{
+          // Draw PPE detection boxes
+          if(Array.isArray(latestDetections)){
+            latestDetections.forEach(b=>{
+              try{
+                const x1 = Math.max(0, b.x1), y1 = Math.max(0, b.y1), x2 = Math.min(overlayCanvasEl.width, b.x2), y2 = Math.min(overlayCanvasEl.height, b.y2);
+                const w = x2 - x1, h = y2 - y1;
+                if(w < 30 || h < 30) return;
+                const label = (b.label||'').toLowerCase();
+                // determine color: missing -> red; present PPE (casco/chaleco) -> cyan; otherwise skip drawing
+                let color = null;
+                if(label.includes('sin')){
+                  color = 'rgba(255,0,0,0.95)';
+                } else if(label.includes('casco') || label.includes('chaleco')){
+                  color = 'rgba(0,200,255,0.95)'; // cyan for present PPE
+                } else {
+                  // unknown label: don't draw
+                  return;
+                }
+                const baseLine = Math.max(3, Math.floor(overlayCanvasEl.width/250));
+                overlayCtx.strokeStyle = color; overlayCtx.lineWidth = (label.includes('sin') ? Math.max(4, Math.floor(baseLine*1.8)) : baseLine);
+                overlayCtx.strokeRect(x1, y1, w, h);
+                overlayCtx.fillStyle = color; overlayCtx.font = Math.max(12, Math.floor(overlayCanvasEl.width/80)) + 'px Arial';
+                const pretty = label.includes('sin') ? (label.includes('casco') ? 'Falta Casco' : 'Falta Chaleco') : (label.includes('casco') ? 'Casco' : 'Chaleco');
+                overlayCtx.fillText(pretty, x1 + 6, Math.max(18, y1 + 20));
+              }catch(e){}
+            });
+          }
+
+          // Draw QR polygon only when a QR was detected (points present)
+          if(dashReady && latestQREntry && latestQREntry.points && latestQREntry.image_w && latestQREntry.image_h){
+            try{
+              const p = latestQREntry.points; const imgW = latestQREntry.image_w, imgH = latestQREntry.image_h;
+              if(imgW && imgH && Array.isArray(p) && p.length){
+                const scaleX = overlayCanvasEl.width / imgW, scaleY = overlayCanvasEl.height / imgH;
+                let xs = p.map(pt=>pt[0]); let ys = p.map(pt=>pt[1]);
+                const x1 = Math.max(0, Math.min(...xs) * scaleX); const y1 = Math.max(0, Math.min(...ys) * scaleY);
+                const x2 = Math.min(overlayCanvasEl.width, Math.max(...xs) * scaleX); const y2 = Math.min(overlayCanvasEl.height, Math.max(...ys) * scaleY);
+                const w = x2 - x1, h = y2 - y1;
+                if(w > 8 && h > 8){
+                  overlayCtx.strokeStyle = 'rgba(0,200,80,0.95)'; // green for QR
+                  overlayCtx.lineWidth = Math.max(4, Math.floor(overlayCanvasEl.width/220));
+                  overlayCtx.strokeRect(x1, y1, w, h);
+                  overlayCtx.fillStyle = 'rgba(0,200,80,0.95)';
+                  overlayCtx.font = Math.max(12, Math.floor(overlayCanvasEl.width/90)) + 'px Arial';
+                  const who = (latestQREntry.user || latestQREntry.qr) ? (latestQREntry.user || latestQREntry.qr) : '';
+                  overlayCtx.fillText('User: ' + who, x1 + 6, Math.max(18, y1 + 18));
+                }
+              }
+            }catch(e){}
+          }
         }catch(e){}
       }
 
@@ -796,8 +961,33 @@
       window.addEventListener('load', ()=>{ startDashCamera().catch(()=>{}); });
 
       // Poll server for latest QR and incidents (reuse existing functions fetchIncidents/fetchUsers when needed)
-      let lastQRTs = null; async function pollLastQR(){ try{ const r = await fetch('/api/last_qr'); if(!r.ok) return; const j = await r.json(); if(j && j.ok && j.entry){ const entry = j.entry; if(entry.ts !== lastQRTs){ lastQRTs = entry.ts; latestQREntry = entry; const el = document.getElementById('qrScans'); if(el && entry && entry.user){ const d = document.createElement('div'); d.style.padding='6px'; d.style.borderBottom='1px solid var(--border)'; d.textContent = `${formatLocal(entry.ts)} — ${entry.user}`; el.insertBefore(d, el.firstChild); while(el.childNodes.length > 10) el.removeChild(el.lastChild); } renderOverlayLocal(); } } }catch(e){} }
-      setInterval(pollLastQR, 2000); pollLastQR();
+      let lastQRTs = null;
+      async function pollLastQR(){
+        try{
+          const r = await fetch('/api/last_qr');
+          if(!r.ok) return;
+          const j = await r.json();
+          if(j && j.ok && j.entry){
+            const entry = j.entry;
+            if(entry.ts !== lastQRTs){
+              lastQRTs = entry.ts;
+              latestQREntry = entry;
+              const el = document.getElementById('qrScans');
+              if(el && entry){
+                const d = document.createElement('div');
+                d.style.padding = '6px';
+                d.style.borderBottom = '1px solid var(--border)';
+                d.textContent = `Usuario: ${entry.user || entry.qr || 'unknown'} Tiempo: ${formatLocal(entry.ts)}`;
+                el.insertBefore(d, el.firstChild);
+                while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+              }
+              renderOverlayLocal();
+            }
+          }
+        }catch(e){}
+      }
+      setInterval(pollLastQR, 2000);
+      pollLastQR();
 
       async function pollLastIncidents(){ try{ const r = await fetch('/api/last_incidents'); if(!r.ok) return; const j = await r.json(); if(j && j.ok && j.entry){ const entry = j.entry; if(entry.ts !== (window._lastIncidentTs||null)){ window._lastIncidentTs = entry.ts; const el = document.getElementById('incidentsLog'); if(el){ const d = document.createElement('div'); d.style.padding='8px'; d.style.borderBottom='1px solid var(--border)'; const hdr = document.createElement('div'); hdr.style.fontWeight='600'; hdr.textContent = entry.summary || (formatLocal(entry.ts) + ' — Incidente'); const det = document.createElement('div'); det.style.color='var(--text-secondary)'; det.style.fontSize='0.9em'; det.textContent = entry.detail || ((entry.type || 'Incidente') + ' - Usuario: ' + (entry.user_identified || entry.user || 'unknown')); d.appendChild(hdr); d.appendChild(det); el.insertBefore(d, el.firstChild); while(el.childNodes.length > 50) el.removeChild(el.lastChild); } } } }catch(e){} }
       setInterval(pollLastIncidents, 2000); pollLastIncidents();

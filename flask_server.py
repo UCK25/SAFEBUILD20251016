@@ -3,6 +3,7 @@ import os, io, time, json
 from PIL import Image
 import numpy as np
 import cv2
+
 try:
     from ultralytics import YOLO
 except Exception:
@@ -170,9 +171,9 @@ def detect_and_annotate(image_np, camera_name: str = 'Camera_1'):
                         except Exception:
                             pass
                     if not skip:
-                        # use dedupe helper to add entry (will handle ts/ts_epoch and short dedupe)
+                        # use dedupe helper to add entry (will handle ts/ts_epoch and dedupe window)
                         try:
-                            ok = _add_qr_log_entry(log_entry, dedupe_seconds=5)
+                            ok = _add_qr_log_entry(log_entry, dedupe_seconds=300)
                             # ok == False means helper considered this a duplicate
                         except Exception:
                             # helper failed; best-effort atomic write
@@ -555,7 +556,7 @@ def _read_incident_log():
     return []
 
 
-@app.route('/api/users', methods=['GET', 'PUT'])
+@app.route('/api/users', methods=['GET', 'PUT', 'POST'])
 def api_users():
     # GET: list users (respect session)
     if request.method == 'GET':
@@ -567,6 +568,46 @@ def api_users():
         for r in rows:
             out.append({'id': r[0], 'username': r[1], 'role': r[2], 'qr_code': r[3]})
         return jsonify(out)
+
+    # POST: create user (body: username, password, role optional, qr_code optional, email optional)
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        current = _get_current_user_from_cookie()
+        if not current:
+            return jsonify({'ok': False, 'error': 'authentication required'}), 401
+        cur_id, cur_name, cur_role = current
+        cur_role = str(cur_role).lower()
+        username = data.get('username')
+        password = data.get('password')
+        role = data.get('role') or 'guest'
+        qr_code = data.get('qr_code')
+        email = data.get('email')
+        if not username or not password:
+            return jsonify({'ok': False, 'error': 'missing username or password'}), 400
+        # permission checks: supervisor cannot create admin
+        if cur_role == 'supervisor' and str(role).lower() == 'admin':
+            return jsonify({'ok': False, 'error': 'not allowed to create admin'}), 403
+        try:
+            from database import register_user, get_user_by_username, update_user_role, update_user_email
+            ok = register_user(username, password, qr_code=qr_code)
+            if not ok:
+                return jsonify({'ok': False, 'error': 'username_taken'}), 400
+            # set role if provided
+            u = get_user_by_username(username)
+            if u and role:
+                try:
+                    update_user_role(u[0], role)
+                except Exception:
+                    pass
+            # set email if provided
+            if u and email:
+                try:
+                    update_user_email(u[0], email)
+                except Exception:
+                    pass
+            return jsonify({'ok': True, 'username': username})
+        except Exception as e:
+            return jsonify({'ok': False, 'error': 'exception', 'detail': str(e)}), 500
 
     # PUT: update user (body contains id, username, role optional, qr_code optional)
     data = request.get_json() or {}
@@ -772,36 +813,43 @@ def api_request_password_reset():
         # allow reset if emails match or if no email on record but caller provided something
         if stored_email and stored_email.strip().lower() != str(email).strip().lower():
             return jsonify({'ok': False, 'error': 'email_mismatch'}), 403
-        # generate temporary password
+        # generate temporary password and attempt to email it to the user
         import random, string
         temp = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(10))
         ok = reset_user_password('system', uid, temp)
         if not ok:
             return jsonify({'ok': False, 'error': 'reset_failed'}), 500
-        # attempt to send email if SMTP configured via environment variables
-        sent = False
+
+        # Send email with the temporary password. Do NOT return the temporary password in the HTTP response.
+        smtp_host = os.environ.get('SMTP_HOST')
+        smtp_port = int(os.environ.get('SMTP_PORT') or 0)
+        smtp_user = os.environ.get('SMTP_USER')
+        smtp_pass = os.environ.get('SMTP_PASS')
+        if not smtp_host or not smtp_port:
+            # SMTP not configured: for security reasons do not reveal the temporary password in the response
+            return jsonify({'ok': False, 'error': 'smtp_not_configured', 'message': 'Configure SMTP to send password reset emails'}), 500
+
         try:
-            smtp_host = os.environ.get('SMTP_HOST')
-            smtp_port = int(os.environ.get('SMTP_PORT') or 0)
-            smtp_user = os.environ.get('SMTP_USER')
-            smtp_pass = os.environ.get('SMTP_PASS')
-            if smtp_host and smtp_port:
-                import smtplib
-                from email.message import EmailMessage
-                msg = EmailMessage()
-                msg['Subject'] = 'SafeBuild - Recuperación de contraseña'
-                msg['From'] = smtp_user or 'no-reply@safebuild'
-                msg['To'] = email
-                msg.set_content(f'Su contraseña temporal es: {temp}\nPor favor inicie sesión y cambie su contraseña.')
-                with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
-                    if smtp_user and smtp_pass:
+            import smtplib
+            from email.message import EmailMessage
+            msg = EmailMessage()
+            msg['Subject'] = 'SafeBuild - Recuperación de contraseña'
+            msg['From'] = smtp_user or 'no-reply@safebuild'
+            msg['To'] = email
+            msg.set_content(f'Su contraseña temporal es: {temp}\nPor favor inicie sesión y cambie su contraseña.')
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
+                if smtp_user and smtp_pass:
+                    try:
                         s.starttls()
-                        s.login(smtp_user, smtp_pass)
-                    s.send_message(msg)
-                sent = True
-        except Exception:
-            sent = False
-        return jsonify({'ok': True, 'sent': sent, 'temporary_password': temp})
+                    except Exception:
+                        pass
+                    s.login(smtp_user, smtp_pass)
+                s.send_message(msg)
+            # success: report sent but do NOT include the password in the response
+            return jsonify({'ok': True, 'sent': True})
+        except Exception as e:
+            # For security, do not return the temporary password even on error
+            return jsonify({'ok': False, 'error': 'email_failed', 'detail': str(e)}), 500
     except Exception as e:
         return jsonify({'ok': False, 'error': 'exception', 'detail': str(e)}), 500
 
@@ -900,6 +948,35 @@ def api_last_incidents():
     return jsonify({'ok': True, 'entry': logs[0]})
 
 
+@app.route('/api/users/<int:user_id>', methods=['DELETE'])
+def api_delete_user(user_id: int):
+    current = _get_current_user_from_cookie()
+    if not current:
+        return jsonify({'ok': False, 'error': 'authentication required'}), 401
+    cur_id, cur_name, cur_role = current
+    # Only admin can delete users, and admins cannot delete other admins
+    try:
+        from database import get_user_by_id, delete_user
+        target = get_user_by_id(user_id)
+    except Exception:
+        target = None
+    if not target:
+        return jsonify({'ok': False, 'error': 'user not found'}), 404
+    target_role = str(target[2]).lower()
+    # Permission checks
+    if str(cur_role).lower() != 'admin':
+        return jsonify({'ok': False, 'error': 'not allowed'}), 403
+    if target_role == 'admin':
+        return jsonify({'ok': False, 'error': 'cannot delete admin'}), 403
+    try:
+        ok = delete_user(user_id)
+        if not ok:
+            return jsonify({'ok': False, 'error': 'delete_failed'}), 500
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': 'exception', 'detail': str(e)}), 500
+
+
 @app.route('/report/csv')
 def report_csv():
     user = _get_current_user_from_cookie()
@@ -911,6 +988,7 @@ def report_csv():
     if not os.path.exists(out):
         return jsonify({'ok': False, 'error': 'report failed'}), 500
     return send_file(out, mimetype='text/csv', as_attachment=True, download_name=os.path.basename(out))
+
 
 
 @app.route('/report/xlsx')
@@ -1169,7 +1247,7 @@ def detect_json():
                             pass
                     if not skip:
                         try:
-                            ok = _add_qr_log_entry(qr_obj, dedupe_seconds=5)
+                            ok = _add_qr_log_entry(qr_obj, dedupe_seconds=300)
                         except Exception:
                             try:
                                 import tempfile

@@ -371,6 +371,7 @@
 
   <script>
     let currentUser = null;
+    function mapRoleLabel(role){ if(!role) return ''; role = String(role).toLowerCase(); if(role === 'guest') return 'Invitado'; if(role === 'supervisor') return 'Supervisor'; if(role === 'admin') return 'Administrador'; return role; }
     
     document.getElementById('backBtn').addEventListener('click', ()=>{ 
       window.location='/dashboard'; 
@@ -393,17 +394,17 @@
           return;
         }
         
-        data.forEach(u=>{
+        data.forEach((u, idx)=>{
           const tr = document.createElement('tr');
           const masked = '********';
-          
+
           // Create role badge
           const roleBadge = document.createElement('span');
-          roleBadge.className = `role-badge role-${u.role}`;
-          roleBadge.textContent = u.role;
-          
+          roleBadge.className = `role-badge role-${(u.role||'').toLowerCase()}`;
+          roleBadge.textContent = mapRoleLabel(u.role);
+
           tr.innerHTML = `
-            <td>${u.id}</td>
+            <td>${idx+1}</td>
             <td><strong>${u.username}</strong></td>
             <td></td>
             <td>${masked}</td>
@@ -573,8 +574,9 @@
       
       // Adjust role select availability: supervisors cannot create admin
       if(currentUser && (currentUser.role||'').toLowerCase() === 'supervisor'){
-        const opt = document.querySelector('#new_role option[value="admin"]'); 
-        if(opt) opt.disabled = true;
+        // Supervisors cannot create admin or supervisor accounts via the UI
+        const optAdmin = document.querySelector('#new_role option[value="admin"]'); if(optAdmin) optAdmin.disabled = true;
+        const optSup = document.querySelector('#new_role option[value="supervisor"]'); if(optSup) optSup.disabled = true;
       }
       
       // Hide create panel for guests or unauthenticated

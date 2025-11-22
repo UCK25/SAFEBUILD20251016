@@ -157,13 +157,13 @@ def ensure_admin_exists(default_username='admin', default_password='admin123', d
             pass
 
 # CRUD Usuarios
-def register_user(username, password, qr_code=None):
+def register_user(username, password, qr_code=None, role='guest'):
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         hashed = _hash_password(password)
-        cursor.execute("INSERT INTO users (username, password, qr_code) VALUES (?, ?, ?)", 
-                      (username, hashed, qr_code))
+        cursor.execute("INSERT INTO users (username, password, qr_code, role) VALUES (?, ?, ?, ?)", 
+                      (username, hashed, qr_code, role))
         conn.commit()
         return True
     except sqlite3.IntegrityError:

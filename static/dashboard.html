@@ -660,6 +660,12 @@
         try{
           const me = await fetch('/api/me', { credentials: 'include' });
           if(!me.ok){ openModal(authModal); return; }
+          const jd = await me.json();
+          const role = (jd && jd.user && jd.user.role) ? String(jd.user.role).toLowerCase() : '';
+          if(!(role === 'admin' || role === 'supervisor')){
+            alert('No autorizado para generar reportes');
+            return;
+          }
           downloadReportZip();
         }catch(e){ openModal(authModal); }
       });
@@ -670,8 +676,11 @@
         window.currentUser = null; if(currentUserDisplay) currentUserDisplay.textContent = 'No autenticado'; if(logoutBtn) logoutBtn.disabled = true; updateTopButtons(); try{ fetchIncidents(); fetchUsers(); }catch(e){}
       });
 
-      // update top button enabled state
-      function updateTopButtons(){ const enabled = !!window.currentUser; if(manageTopBtn){ manageTopBtn.disabled = !enabled; manageTopBtn.style.opacity = enabled ? '1' : '0.45'; } if(reportTopBtn){ reportTopBtn.disabled = !enabled; reportTopBtn.style.opacity = enabled ? '1' : '0.45'; } }
+      // role display mapping
+      function mapRoleLabel(role){ if(!role) return ''; role = String(role).toLowerCase(); if(role === 'guest') return 'Invitado'; if(role === 'supervisor') return 'Supervisor'; if(role === 'admin') return 'Administrador'; return role; }
+
+      // update top button enabled state (includes Registrar enable/disable)
+      function updateTopButtons(){ const enabled = !!window.currentUser; if(manageTopBtn){ manageTopBtn.disabled = !enabled; manageTopBtn.style.opacity = enabled ? '1' : '0.45'; } if(reportTopBtn){ try{ const role = (window.currentUser && window.currentUser.role)? String(window.currentUser.role).toLowerCase() : ''; const reportAllowed = (role === 'admin' || role === 'supervisor'); reportTopBtn.disabled = !reportAllowed; reportTopBtn.style.opacity = reportAllowed ? '1' : '0.45'; }catch(e){ reportTopBtn.disabled = true; reportTopBtn.style.opacity = '0.45'; } } if(registerTopBtn){ registerTopBtn.disabled = !!window.currentUser; registerTopBtn.style.opacity = registerTopBtn.disabled ? '0.45' : '1'; } }
 
       // Modal close clicks
       const closeAuth = document.getElementById('closeAuth'); if(closeAuth) closeAuth.addEventListener('click', ()=> closeModal(authModal));
@@ -689,7 +698,7 @@
             const res = await fetch('/api/login', { method:'POST', credentials:'include', headers:{'content-type':'application/json'}, body: JSON.stringify({username:u, password:p}) });
             if(!res.ok) return alert('Login falló');
             const data = await res.json();
-            if(data.ok){ window.currentUser = data.user; if(currentUserDisplay) currentUserDisplay.textContent = `${window.currentUser.username} (${window.currentUser.role})`; if(logoutBtn) logoutBtn.disabled = false; updateTopButtons(); closeModal(authModal); try{ fetchIncidents(); fetchUsers(); }catch(e){} }
+            if(data.ok){ window.currentUser = data.user; if(currentUserDisplay) currentUserDisplay.textContent = `${window.currentUser.username} (${mapRoleLabel(window.currentUser.role)})`; if(logoutBtn) logoutBtn.disabled = false; updateTopButtons(); closeModal(authModal); try{ fetchIncidents(); fetchUsers(); }catch(e){} }
             else alert('Credenciales inválidas');
           }catch(e){ alert('Error en login: '+e.message); }
         });
@@ -807,9 +816,10 @@
           const data = await res.json(); const tbody = document.querySelector('#usersTable tbody'); if(!tbody) return; tbody.innerHTML = '';
           if(!window.currentUser){ const tr = document.createElement('tr'); tr.innerHTML = `<td colspan="5" style="text-align:center;padding:20px">Autenticar para ver usuarios.</td>`; tbody.appendChild(tr); return; }
           const allowed = ['admin','supervisor']; let visible = data; if(!allowed.includes(window.currentUser.role)){ visible = data.filter(u => u.username === window.currentUser.username); }
-          visible.forEach(u=>{
+          visible.forEach((u, idx)=>{
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>********</td><td></td>`;
+            const roleLabel = mapRoleLabel(u.role);
+            tr.innerHTML = `<td>${idx+1}</td><td>${u.username}</td><td>${roleLabel}</td><td>********</td><td></td>`;
             const btnTd = tr.querySelector('td:last-child');
             // Download QR only on dashboard
             const dl = document.createElement('button');
@@ -829,7 +839,7 @@
       }
 
       // Initial load: check session
-      async function initialLoad(){ try{ const me = await fetch('/api/me', { credentials: 'include' }); if(me.ok){ const jd = await me.json(); if(jd.ok){ window.currentUser = jd.user; if(currentUserDisplay) currentUserDisplay.textContent = `${window.currentUser.username} (${window.currentUser.role})`; if(logoutBtn) logoutBtn.disabled = false; } } updateTopButtons(); }catch(e){} fetchIncidents(); fetchUsers(); }
+      async function initialLoad(){ try{ const me = await fetch('/api/me', { credentials: 'include' }); if(me.ok){ const jd = await me.json(); if(jd.ok){ window.currentUser = jd.user; if(currentUserDisplay) currentUserDisplay.textContent = `${window.currentUser.username} (${mapRoleLabel(window.currentUser.role)})`; if(logoutBtn) logoutBtn.disabled = false; } } updateTopButtons(); }catch(e){} fetchIncidents(); fetchUsers(); }
       initialLoad();
 
       // Wire registerTopBtn to open public modal
@@ -881,12 +891,17 @@
                   latestQREntry = j.qr;
                   lastQSeenTs = Date.now();
                   const el = document.getElementById('qrScans');
+                  const countEl = document.getElementById('qrCount');
                   if(el && j.qr){
+                    // remove initial placeholder if present
+                    if(el.children.length === 1 && el.children[0].textContent && el.children[0].textContent.indexOf('Esperando') !== -1){ el.innerHTML = ''; }
                     const d = document.createElement('div');
                     d.style.padding='6px'; d.style.borderBottom='1px solid var(--border)';
+                    d.className = 'log-entry';
                     d.textContent = `Usuario: ${j.qr.user || j.qr.qr || 'unknown'} Tiempo: ${formatLocal(j.qr.ts)}`;
                     el.insertBefore(d, el.firstChild);
                     while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+                    if(countEl) countEl.textContent = String(el.children.length);
                   }
                 } else {
                   latestQREntry = null;
@@ -974,12 +989,16 @@
               latestQREntry = entry;
               const el = document.getElementById('qrScans');
               if(el && entry){
-                const d = document.createElement('div');
-                d.style.padding = '6px';
-                d.style.borderBottom = '1px solid var(--border)';
-                d.textContent = `Usuario: ${entry.user || entry.qr || 'unknown'} Tiempo: ${formatLocal(entry.ts)}`;
-                el.insertBefore(d, el.firstChild);
-                while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+                  const d = document.createElement('div');
+                  d.style.padding = '6px';
+                  d.style.borderBottom = '1px solid var(--border)';
+                  d.className = 'log-entry';
+                  d.textContent = `Usuario: ${entry.user || entry.qr || 'unknown'} Tiempo: ${formatLocal(entry.ts)}`;
+                  // remove placeholder if present
+                  if(el.children.length === 1 && el.children[0].textContent && el.children[0].textContent.indexOf('Esperando') !== -1){ el.innerHTML = ''; }
+                  el.insertBefore(d, el.firstChild);
+                  while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+                  const countEl = document.getElementById('qrCount'); if(countEl) countEl.textContent = String(el.children.length);
               }
               renderOverlayLocal();
             }

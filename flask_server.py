@@ -91,23 +91,74 @@ def detect_qr_code(image_np):
     except Exception:
         pyzbar = None
 
-    try:
-        if pyzbar is not None:
-            gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
+    # Helper: try pyzbar on a grayscale image
+    def try_pyzbar(img):
+        try:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             objs = pyzbar.decode(gray)
             if objs:
                 first = objs[0]
-                val = first.data.decode('utf-8') if hasattr(first, 'data') else None
+                try:
+                    val = first.data.decode('utf-8') if hasattr(first, 'data') else None
+                except Exception:
+                    val = None
                 pts = getattr(first, 'polygon', None)
                 return val, pts
+        except Exception:
+            return None, None
+        return None, None
 
-        # Fallback a OpenCV QRCodeDetector
-        detector = cv2.QRCodeDetector()
-        value, points, _ = detector.detectAndDecode(image_np)
-        if value:
-            return value, points
+    # Try multiple strategies with safe catches. Return on first success.
+    try:
+        # 1) pyzbar on provided image (assume BGR)
+        if pyzbar is not None:
+            v, p = try_pyzbar(image_np)
+            if v:
+                return v, p
+
+        # 2) pyzbar on color-swapped image (sometimes frames arrive RGB)
+        if pyzbar is not None:
+            try:
+                img_swapped = image_np[:, :, ::-1]
+                v, p = try_pyzbar(img_swapped)
+                if v:
+                    return v, p
+            except Exception:
+                pass
+
+        # 3) OpenCV detector on grayscale
+        try:
+            gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
+        except Exception:
+            try:
+                gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+            except Exception:
+                gray = None
+        try:
+            detector = cv2.QRCodeDetector()
+            if gray is not None:
+                val, points, _ = detector.detectAndDecode(gray)
+            else:
+                val, points, _ = detector.detectAndDecode(image_np)
+            if val:
+                return val, points
+        except Exception:
+            pass
+
+        # 4) try thresholded images (sometimes helps with glare)
+        try:
+            if gray is None:
+                gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
+            _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            detector = cv2.QRCodeDetector()
+            val, points, _ = detector.detectAndDecode(th)
+            if val:
+                return val, points
+        except Exception:
+            pass
     except Exception as e:
         print(f"QR detection error: {e}")
+
     return None, None
 
 def detect_and_annotate(image_np, camera_name: str = 'Camera_1'):
@@ -563,8 +614,31 @@ def api_users():
         current = _get_current_user_from_cookie()
         if not current:
             return jsonify([])
+        cur_id, cur_name, cur_role = current
+        cur_role = str(cur_role).lower()
         rows = list_users()
         out = []
+        # Guests: only their own record
+        if cur_role == 'guest':
+            for r in rows:
+                try:
+                    if str(r[1]) == str(cur_name):
+                        out.append({'id': r[0], 'username': r[1], 'role': r[2], 'qr_code': r[3]})
+                        break
+                except Exception:
+                    continue
+            return jsonify(out)
+        # Supervisors: see self and all guests
+        if cur_role == 'supervisor':
+            for r in rows:
+                try:
+                    role_r = str(r[2]).lower()
+                    if role_r == 'guest' or str(r[1]) == str(cur_name):
+                        out.append({'id': r[0], 'username': r[1], 'role': r[2], 'qr_code': r[3]})
+                except Exception:
+                    continue
+            return jsonify(out)
+        # Admins: see all
         for r in rows:
             out.append({'id': r[0], 'username': r[1], 'role': r[2], 'qr_code': r[3]})
         return jsonify(out)
@@ -584,12 +658,13 @@ def api_users():
         email = data.get('email')
         if not username or not password:
             return jsonify({'ok': False, 'error': 'missing username or password'}), 400
-        # permission checks: supervisor cannot create admin
-        if cur_role == 'supervisor' and str(role).lower() == 'admin':
-            return jsonify({'ok': False, 'error': 'not allowed to create admin'}), 403
+        # permission checks: supervisor cannot create admin or supervisor
+        if cur_role == 'supervisor' and str(role).lower() in ('admin', 'supervisor'):
+            return jsonify({'ok': False, 'error': 'not allowed to create admin or supervisor'}), 403
         try:
             from database import register_user, get_user_by_username, update_user_role, update_user_email
-            ok = register_user(username, password, qr_code=qr_code)
+            # pass requested role explicitly to avoid DB default role surprises
+            ok = register_user(username, password, qr_code=qr_code, role=role)
             if not ok:
                 return jsonify({'ok': False, 'error': 'username_taken'}), 400
             # set role if provided
@@ -674,7 +749,7 @@ def api_register_guest():
 
     if requested_username:
         pwd = _gen_password(10)
-        ok = register_user(requested_username, pwd)
+        ok = register_user(requested_username, pwd, role='guest')
         if not ok:
             return jsonify({'ok': False, 'error': 'username_taken'}), 400
         created_username = requested_username
@@ -687,7 +762,7 @@ def api_register_guest():
         for _ in range(6):
             cand = base + str(random.randint(1000, 9999))
             pwd = _gen_password(10)
-            ok = register_user(cand, pwd)
+            ok = register_user(cand, pwd, role='guest')
             if ok:
                 created_username = cand
                 created_password = pwd
@@ -728,7 +803,7 @@ def api_register_guest_public():
     qr_val = f"GUEST-{int(time.time())}-{random.randint(1000,9999)}"
 
     # try to register user with qr_code
-    ok = register_user(requested_username, requested_password, qr_code=qr_val)
+    ok = register_user(requested_username, requested_password, qr_code=qr_val, role='guest')
     if not ok:
         return jsonify({'ok': False, 'error': 'username_taken'}), 400
 
@@ -1175,6 +1250,16 @@ def detect_json():
     except Exception:
         return jsonify({'ok': False, 'error': 'invalid image'}), 400
 
+    try:
+        print(f"[DETECT_JSON] request from {request.remote_addr} - image shape: {img_np.shape}")
+    except Exception:
+        print("[DETECT_JSON] request received")
+
+    try:
+        print(f"[DETECT_JSON] request from {request.remote_addr} - image shape: {img_np.shape}")
+    except Exception:
+        print("[DETECT_JSON] request received")
+
     if model is None:
         return jsonify({'ok': False, 'error': 'no model'}), 500
 
@@ -1285,6 +1370,19 @@ def detect_json():
                                     pass
                         except Exception:
                             pass
+                except Exception:
+                    pass
+                # Log QR detection for debugging
+                try:
+                    try:
+                        tsnow = qr_obj.get('ts') if isinstance(qr_obj, dict) else time.strftime('%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        tsnow = time.strftime('%Y-%m-%d %H:%M:%S')
+                    try:
+                        cam_log = qr_obj.get('camera') if isinstance(qr_obj, dict) else (request.form.get('camera') or request.args.get('camera') or 'Camera_1')
+                    except Exception:
+                        cam_log = request.form.get('camera') or request.args.get('camera') or 'Camera_1'
+                    print(f"[QR-DETECTED] qr={qr_found} user={qr_user} camera={cam_log} ts={tsnow}")
                 except Exception:
                     pass
             except Exception:

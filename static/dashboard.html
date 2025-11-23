@@ -635,6 +635,18 @@
       function openModal(el){ if(!el) return; if(overlay) overlay.style.display='flex'; el.style.display='block'; }
       function closeModal(el){ if(!el) return; el.style.display='none'; if(overlay) overlay.style.display='none'; }
 
+      // Helper: format timestamp string 'YYYY-MM-DD HH:MM:SS' into local display
+      function formatLocal(ts){
+        try{
+          if(!ts) return '';
+          // convert 'YYYY-MM-DD HH:MM:SS' to ISO-like 'YYYY-MM-DDTHH:MM:SS' for Date parsing
+          const iso = String(ts).replace(' ', 'T');
+          const d = new Date(iso);
+          if(isNaN(d.getTime())) return ts;
+          return d.toLocaleString();
+        }catch(e){ return ts; }
+      }
+
       // Top button handlers
       if(authTopBtn) authTopBtn.addEventListener('click', ()=>{ openModal(authModal); const mu = document.getElementById('modal_user'); if(mu) mu.focus(); });
       if(manageTopBtn) manageTopBtn.addEventListener('click', ()=>{ window.location = '/manage'; });
@@ -953,21 +965,30 @@
               const p = latestQREntry.points; const imgW = latestQREntry.image_w, imgH = latestQREntry.image_h;
               if(imgW && imgH && Array.isArray(p) && p.length){
                 const scaleX = overlayCanvasEl.width / imgW, scaleY = overlayCanvasEl.height / imgH;
-                let xs = p.map(pt=>pt[0]); let ys = p.map(pt=>pt[1]);
-                const x1 = Math.max(0, Math.min(...xs) * scaleX); const y1 = Math.max(0, Math.min(...ys) * scaleY);
-                const x2 = Math.min(overlayCanvasEl.width, Math.max(...xs) * scaleX); const y2 = Math.min(overlayCanvasEl.height, Math.max(...ys) * scaleY);
-                const w = x2 - x1, h = y2 - y1;
-                if(w > 8 && h > 8){
-                  overlayCtx.strokeStyle = 'rgba(0,200,80,0.95)'; // green for QR
-                  overlayCtx.lineWidth = Math.max(4, Math.floor(overlayCanvasEl.width/220));
-                  overlayCtx.strokeRect(x1, y1, w, h);
+                // normalize points array: can be [[x,y],...] or nested arrays
+                const pts = p.map(pt => Array.isArray(pt) ? [Number(pt[0]), Number(pt[1])] : [Number(pt.x||pt[0]), Number(pt.y||pt[1])]);
+                // draw polygon
+                overlayCtx.beginPath();
+                pts.forEach((pt, idx) => {
+                  const x = Math.max(0, Math.min(overlayCanvasEl.width, pt[0] * scaleX));
+                  const y = Math.max(0, Math.min(overlayCanvasEl.height, pt[1] * scaleY));
+                  if(idx === 0) overlayCtx.moveTo(x,y); else overlayCtx.lineTo(x,y);
+                });
+                overlayCtx.closePath();
+                overlayCtx.strokeStyle = 'rgba(0,200,80,0.95)';
+                overlayCtx.lineWidth = Math.max(4, Math.floor(overlayCanvasEl.width/220));
+                overlayCtx.stroke();
+                // label
+                try{
+                  const bboxX = Math.min(...pts.map(pt => pt[0])) * scaleX;
+                  const bboxY = Math.min(...pts.map(pt => pt[1])) * scaleY;
                   overlayCtx.fillStyle = 'rgba(0,200,80,0.95)';
                   overlayCtx.font = Math.max(12, Math.floor(overlayCanvasEl.width/90)) + 'px Arial';
                   const who = (latestQREntry.user || latestQREntry.qr) ? (latestQREntry.user || latestQREntry.qr) : '';
-                  overlayCtx.fillText('User: ' + who, x1 + 6, Math.max(18, y1 + 18));
-                }
+                  overlayCtx.fillText('User: ' + who, Math.max(6, bboxX + 6), Math.max(18, bboxY + 18));
+                }catch(e){}
               }
-            }catch(e){}
+            }catch(e){ console.warn('QR overlay draw error', e); }
           }
         }catch(e){}
       }

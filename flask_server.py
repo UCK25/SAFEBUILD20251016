@@ -91,74 +91,23 @@ def detect_qr_code(image_np):
     except Exception:
         pyzbar = None
 
-    # Helper: try pyzbar on a grayscale image
-    def try_pyzbar(img):
-        try:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    try:
+        if pyzbar is not None:
+            gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
             objs = pyzbar.decode(gray)
             if objs:
                 first = objs[0]
-                try:
-                    val = first.data.decode('utf-8') if hasattr(first, 'data') else None
-                except Exception:
-                    val = None
+                val = first.data.decode('utf-8') if hasattr(first, 'data') else None
                 pts = getattr(first, 'polygon', None)
                 return val, pts
-        except Exception:
-            return None, None
-        return None, None
 
-    # Try multiple strategies with safe catches. Return on first success.
-    try:
-        # 1) pyzbar on provided image (assume BGR)
-        if pyzbar is not None:
-            v, p = try_pyzbar(image_np)
-            if v:
-                return v, p
-
-        # 2) pyzbar on color-swapped image (sometimes frames arrive RGB)
-        if pyzbar is not None:
-            try:
-                img_swapped = image_np[:, :, ::-1]
-                v, p = try_pyzbar(img_swapped)
-                if v:
-                    return v, p
-            except Exception:
-                pass
-
-        # 3) OpenCV detector on grayscale
-        try:
-            gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
-        except Exception:
-            try:
-                gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-            except Exception:
-                gray = None
-        try:
-            detector = cv2.QRCodeDetector()
-            if gray is not None:
-                val, points, _ = detector.detectAndDecode(gray)
-            else:
-                val, points, _ = detector.detectAndDecode(image_np)
-            if val:
-                return val, points
-        except Exception:
-            pass
-
-        # 4) try thresholded images (sometimes helps with glare)
-        try:
-            if gray is None:
-                gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
-            _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            detector = cv2.QRCodeDetector()
-            val, points, _ = detector.detectAndDecode(th)
-            if val:
-                return val, points
-        except Exception:
-            pass
+        # Fallback a OpenCV QRCodeDetector
+        detector = cv2.QRCodeDetector()
+        value, points, _ = detector.detectAndDecode(image_np)
+        if value:
+            return value, points
     except Exception as e:
         print(f"QR detection error: {e}")
-
     return None, None
 
 def detect_and_annotate(image_np, camera_name: str = 'Camera_1'):
@@ -170,6 +119,7 @@ def detect_and_annotate(image_np, camera_name: str = 'Camera_1'):
 
     # Detectar QR antes de la inferencia para poder asociar usuario a un incidente
     qr_value, qr_points = detect_qr_code(image_np)
+    print(f"[DEBUG] detect_qr_code result: value={qr_value}, points={qr_points}")
     user = None
     if qr_value:
         try:
@@ -195,7 +145,6 @@ def detect_and_annotate(image_np, camera_name: str = 'Camera_1'):
                 except Exception:
                     pts_serial = None
 
-                # prefer direct mapping from detected QR; if not present, try recent QR log for same camera
                 user_ident = (user[1] if user else None) or _find_recent_qr_user(camera_name, within_seconds=5)
                 log_entry = {
                     'ts': tsnow,
@@ -222,9 +171,9 @@ def detect_and_annotate(image_np, camera_name: str = 'Camera_1'):
                         except Exception:
                             pass
                     if not skip:
-                        # use dedupe helper to add entry (will handle ts/ts_epoch and dedupe window)
+                        # use dedupe helper to add entry (will handle ts/ts_epoch and short dedupe)
                         try:
-                            ok = _add_qr_log_entry(log_entry, dedupe_seconds=300)
+                            ok = _add_qr_log_entry(log_entry, dedupe_seconds=5)
                             # ok == False means helper considered this a duplicate
                         except Exception:
                             # helper failed; best-effort atomic write
@@ -942,6 +891,7 @@ def api_change_password():
         return jsonify({'ok': False, 'error': 'invalid_password', 'message': 'La contraseña debe tener al menos 6 caracteres'}), 400
     try:
         uid = int(current[0])
+        from database import reset_user_password
         ok = reset_user_password(current[1], uid, newp)
         if ok:
             return jsonify({'ok': True})
@@ -1241,44 +1191,31 @@ def detect():
 @app.route('/detect_json', methods=['POST'])
 def detect_json():
     # Similar al endpoint original, pero optimizado para baja latencia: devuelve cajas y QR (si aplica)
+    print('[DEBUG] /detect_json called')
     if 'frame' not in request.files:
         return jsonify({'ok': False, 'error': 'missing file'}), 400
     f = request.files['frame']
+    annotated_error = None
+    boxes_out = []
+    qr_obj = None
+    qr_user = None
+    image_annotated_base64 = None
+    img_np = None
+    annotated = None
+
+    # Cargar imagen
     try:
         img = Image.open(io.BytesIO(f.read())).convert('RGB')
         img_np = np.array(img)[:, :, ::-1]
-    except Exception:
-        return jsonify({'ok': False, 'error': 'invalid image'}), 400
+        annotated = img_np.copy()
+    except Exception as e:
+        annotated_error = f"Error leyendo imagen: {e}"
+        return jsonify({'ok': False, 'error': 'invalid_image', 'annotated_error': annotated_error}), 400
 
-    try:
-        print(f"[DETECT_JSON] request from {request.remote_addr} - image shape: {img_np.shape}")
-    except Exception:
-        print("[DETECT_JSON] request received")
-
-    try:
-        print(f"[DETECT_JSON] request from {request.remote_addr} - image shape: {img_np.shape}")
-    except Exception:
-        print("[DETECT_JSON] request received")
-
-    if model is None:
-        return jsonify({'ok': False, 'error': 'no model'}), 500
-
-    try:
-        # Inferencia a resolución reducida para mejorar el tiempo de respuesta
-        results = model.predict(source=img_np, imgsz=320, conf=DEFAULT_CONF, iou=0.5, max_det=50, verbose=False)
-    except Exception:
-        try:
-            results = model(img_np, imgsz=320, conf=0.35, verbose=False)
-        except Exception as e:
-            return jsonify({'ok': False, 'error': str(e)}), 500
-
-    boxes_out = []
-    qr_found = None
-    qr_user = None
-    qr_obj = None
-    # detectar QR de forma rápida (si hay) y mapear a usuario si existe
+    # Detectar QR primero
     try:
         qr_val, qr_points = detect_qr_code(img_np)
+        print(f"[DEBUG] detect_qr_code -> val={qr_val}, pts={qr_points}")
         if qr_val:
             qr_found = qr_val
             try:
@@ -1287,7 +1224,34 @@ def detect_json():
                     qr_user = u[1]
             except Exception:
                 qr_user = None
-            # construir objeto QR para respuesta: ts, qr, user, points, image sizes
+
+            # Dibujar polígono verde para QR
+            try:
+                pts = qr_points
+                if pts is not None:
+                    arr = None
+                    try:
+                        import numpy as _np
+                        arr = _np.array(pts, dtype=int)
+                    except Exception:
+                        try:
+                            arr = np.array(pts, dtype=int)
+                        except Exception:
+                            arr = None
+                    if arr is not None and arr.size:
+                        pts_t = arr.reshape((-1, 2))
+                        pts_list = [(int(x), int(y)) for x, y in pts_t]
+                        try:
+                            cv2.polylines(annotated, [np.array(pts_list, dtype=int)], True, (0,255,0), 2)
+                            nombre = qr_user if qr_user else "QR"
+                            cv2.putText(annotated, nombre, (pts_list[0][0], max(pts_list[0][1]-10,0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+                        except Exception as e:
+                            annotated_error = (annotated_error or '') + f"|Error al dibujar QR: {e}"
+
+            except Exception as e:
+                annotated_error = (annotated_error or '') + f"|Error al procesar QR: {e}"
+
+            # Construir objeto QR y guardar en log (intentar, sin bloquear)
             try:
                 tsnow = time.strftime('%Y-%m-%d %H:%M:%S')
                 pts_serial = None
@@ -1308,58 +1272,103 @@ def detect_json():
                     'user': qr_user,
                     'points': pts_serial,
                     'image_w': int(img_np.shape[1]) if hasattr(img_np, 'shape') else None,
-                    'image_h': int(img_np.shape[0]) if hasattr(img_np, 'shape') else None
+                    'image_h': int(img_np.shape[0]) if hasattr(img_np, 'shape') else None,
+                    'camera': request.form.get('camera') or request.args.get('camera') or 'Camera_1'
                 }
-                # registrar en log local (mantener últimas 100 entradas)
                 try:
-                    cam_for_qr = request.form.get('camera') or request.args.get('camera') or 'Camera_1'
-                except Exception:
-                    cam_for_qr = 'Camera_1'
-                qr_obj['camera'] = cam_for_qr
-                # avoid duplicate QR log entries (same qr+camera within 5s)
-                try:
-                    logs = _read_qr_log()
-                    last = logs[0] if logs else None
-                    skip = False
-                    if last and last.get('qr') == qr_obj.get('qr') and last.get('camera') == qr_obj.get('camera'):
+                    ok_log = _add_qr_log_entry(qr_obj, dedupe_seconds=5)
+                    print(f"[DEBUG] _add_qr_log_entry returned: {ok_log} for qr={qr_obj.get('qr')}")
+                    if not ok_log:
+                        # fallback atomic write when dedupe or helper returned False
                         try:
-                            from datetime import datetime as _dt
-                            last_ts = _dt.strptime(last.get('ts'), '%Y-%m-%d %H:%M:%S')
-                            now_ts = _dt.strptime(qr_obj.get('ts'), '%Y-%m-%d %H:%M:%S')
-                            if abs((now_ts - last_ts).total_seconds()) <= 5:
-                                skip = True
-                        except Exception:
-                            pass
-                    if not skip:
-                        try:
-                            ok = _add_qr_log_entry(qr_obj, dedupe_seconds=300)
-                        except Exception:
+                            import tempfile
+                            existing = _read_qr_log() or []
+                            new_logs = [qr_obj] + existing[:99]
+                            tmp = tempfile.NamedTemporaryFile('w', delete=False, encoding='utf-8')
+                            json.dump(new_logs, tmp, ensure_ascii=False, indent=2)
+                            tmp.flush()
+                            tmp_name = tmp.name
+                            tmp.close()
+                            os.replace(tmp_name, QR_LOG_FILE)
+                            print(f"[DEBUG] Fallback wrote QR log to {QR_LOG_FILE}")
+                        except Exception as e:
                             try:
-                                import tempfile
-                                existing = _read_qr_log() or []
-                                new_logs = [qr_obj] + existing[:99]
-                                tmp = tempfile.NamedTemporaryFile('w', delete=False, encoding='utf-8')
-                                json.dump(new_logs, tmp, ensure_ascii=False, indent=2)
-                                tmp.flush()
-                                tmp_name = tmp.name
-                                tmp.close()
-                                os.replace(tmp_name, QR_LOG_FILE)
-                            except Exception:
-                                try:
-                                    _write_qr_log([qr_obj] + (existing if 'existing' in locals() else [])[:99])
-                                except Exception:
-                                    pass
-                        # si detectamos usuario, intentar vincular a incidentes recientes desconocidos
+                                _write_qr_log([qr_obj] + (existing if 'existing' in locals() else [])[:99])
+                                print(f"[DEBUG] Fallback _write_qr_log succeeded for qr={qr_obj.get('qr')}")
+                            except Exception as e2:
+                                print(f"[ERROR] Could not write QR log fallback: {e} / {e2}")
+                except Exception as e:
+                    print(f"[ERROR] Exception adding qr log entry: {e}")
+                print(f"[DEBUG] qr_obj prepared: {json.dumps(qr_obj, ensure_ascii=False)[:400]}")
+            except Exception:
+                pass
+
+    except Exception:
+        # ignore QR errors
+        qr_obj = None
+
+    # Ejecutar inferencia si hay modelo disponible
+    results = None
+    if model is not None:
+        try:
+            results = model.predict(source=img_np, imgsz=320, conf=DEFAULT_CONF, iou=0.5, max_det=50, verbose=False)
+        except Exception:
+            try:
+                results = model(img_np, imgsz=320, conf=0.35, verbose=False)
+            except Exception as e:
+                annotated_error = (annotated_error or '') + f"|Inference error: {e}"
+
+    # Procesar resultados de YOLO
+    try:
+        if results:
+            r = results[0]
+            boxes = getattr(r, 'boxes', None)
+            if boxes is not None and hasattr(boxes, 'xyxy'):
+                xyxy = boxes.xyxy.cpu().numpy()
+                cls_ids = boxes.cls.cpu().numpy()
+                for i, box in enumerate(xyxy):
+                    x1, y1, x2, y2 = [int(v) for v in box]
+                    cid = int(cls_ids[i]) if len(cls_ids) > i else 0
+                    raw = r.names.get(cid, str(cid))
+                    cname = normalize_class_name(raw)
+                    if cname in ("casco", "sin casco", "chaleco", "sin chaleco"):
+                        boxes_out.append({'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'label': cname})
                         try:
-                            if qr_obj.get('user'):
+                            color = (0, 0, 255) if 'sin' in cname else (255, 191, 0)
+                            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                            label = ('Falta Casco' if 'sin' in cname and 'casco' in cname else
+                                     'Falta Chaleco' if 'sin' in cname else
+                                     'Casco' if 'casco' in cname else 'Chaleco')
+                            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                            tx1, ty1 = x1, max(y1 - th - 8, 0)
+                            tx2, ty2 = x1 + tw + 8, ty1 + th + 6
+                            cv2.rectangle(annotated, (tx1, ty1), (tx2, ty2), (0, 0, 0), -1)
+                            cv2.putText(annotated, label, (x1 + 4, ty2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                        except Exception as e:
+                            annotated_error = (annotated_error or '') + f"|YOLO draw error: {e}"
+
+                        # Si es violación, registrar incidente de forma mínima
+                        if 'sin' in cname:
+                            try:
+                                cam = request.form.get('camera') or request.args.get('camera') or 'Camera_1'
+                                user_ident = qr_user or _find_recent_qr_user(cam, within_seconds=5)
+                                ts = time.strftime('%Y%m%d_%H%M%S')
+                                ev_path = os.path.join(CAPTURES_DIR, f'inc_{ts}.jpg')
                                 try:
-                                    update_incident_user_recent(cam_for_qr, 'Falta Casco', qr_obj.get('user'), within_seconds=5)
+                                    cv2.imwrite(ev_path, img_np)
                                 except Exception:
-                                    pass
-                                try:
-                                    update_incident_user_recent(cam_for_qr, 'Falta Chaleco', qr_obj.get('user'), within_seconds=5)
-                                except Exception:
-                                    pass
+                                    ev_path = None
+                                incident_type = 'Falta Casco' if 'casco' in cname else 'Falta Chaleco'
+                                description = f"{incident_type} — {cam} {time.strftime('%Y-%m-%d %H:%M:%S')}\nUsuario: {user_ident or 'unknown'}"
+                                dedupe_min = 5.0 / 60.0
+                                register_incident(
+                                    camera_name=cam,
+                                    incident_type=incident_type,
+                                    description=description,
+                                    user_identified=user_ident,
+                                    evidence_path=ev_path,
+                                    dedupe_window_minutes=dedupe_min
+                                )
                                 try:
                                     incidents = list_incidents()
                                     simple = []
@@ -1368,86 +1377,33 @@ def detect_json():
                                     _write_incident_log(simple[:200])
                                 except Exception:
                                     pass
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                # Log QR detection for debugging
-                try:
-                    try:
-                        tsnow = qr_obj.get('ts') if isinstance(qr_obj, dict) else time.strftime('%Y-%m-%d %H:%M:%S')
-                    except Exception:
-                        tsnow = time.strftime('%Y-%m-%d %H:%M:%S')
-                    try:
-                        cam_log = qr_obj.get('camera') if isinstance(qr_obj, dict) else (request.form.get('camera') or request.args.get('camera') or 'Camera_1')
-                    except Exception:
-                        cam_log = request.form.get('camera') or request.args.get('camera') or 'Camera_1'
-                    print(f"[QR-DETECTED] qr={qr_found} user={qr_user} camera={cam_log} ts={tsnow}")
-                except Exception:
-                    pass
-            except Exception:
-                qr_obj = None
-    except Exception:
-        qr_found = None
-
-    if results:
-        r = results[0]
-        boxes = getattr(r, 'boxes', None)
-        if boxes is not None and hasattr(boxes, 'xyxy'):
-            xyxy = boxes.xyxy.cpu().numpy()
-            cls_ids = boxes.cls.cpu().numpy()
-            for i, box in enumerate(xyxy):
-                x1,y1,x2,y2 = [float(v) for v in box]
-                cid = int(cls_ids[i]) if len(cls_ids)>i else 0
-                raw = r.names.get(cid, str(cid))
-                cname = normalize_class_name(raw)
-                if cname in ("casco", "sin casco", "chaleco", "sin chaleco"):
-                    boxes_out.append({'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'label': cname})
-                    # si es violación, registrar incidente de forma mínima
-                    if 'sin' in cname:
-                        try:
-                            cam = request.form.get('camera') or request.args.get('camera') or 'Camera_1'
-                            # Prefer direct QR mapping; if missing, look for a recent QR nearby (within 5s)
-                            user_ident = qr_user or _find_recent_qr_user(cam, within_seconds=5)
-                            ts = time.strftime('%Y%m%d_%H%M%S')
-                            ev_path = os.path.join(CAPTURES_DIR, f'inc_{ts}.jpg')
-                            try:
-                                cv2.imwrite(ev_path, img_np)
-                            except Exception:
-                                ev_path = None
-
-                            # Map normalized classname to human-friendly incident type to match other paths
-                            if 'casco' in cname:
-                                incident_type = 'Falta Casco'
-                            else:
-                                incident_type = 'Falta Chaleco'
-
-                            # description consistent with other code paths
-                            description = f"{incident_type} — {cam} {time.strftime('%Y-%m-%d %H:%M:%S')}\nUsuario: {user_ident or 'unknown'}"
-
-                            # dedupe window: 5 seconds expressed in minutes
-                            dedupe_min = 5.0 / 60.0
-                            register_incident(
-                                camera_name=cam,
-                                incident_type=incident_type,
-                                description=description,
-                                user_identified=user_ident,
-                                evidence_path=ev_path,
-                                dedupe_window_minutes=dedupe_min
-                            )
-                            try:
-                                incidents = list_incidents()
-                                simple = []
-                                for inc in incidents:
-                                    simple.append({'id': inc[0], 'camera_name': inc[1], 'type': inc[2], 'timestamp': inc[3], 'description': inc[4], 'status': inc[5], 'evidence_path': inc[6], 'user_identified': inc[7]})
-                                _write_incident_log(simple[:200])
                             except Exception:
                                 pass
-                        except Exception:
-                            pass
+    except Exception:
+        pass
 
-    # devolver qr como objeto compatible con frontend (o null)
-    return jsonify({'ok': True, 'boxes': boxes_out, 'qr': qr_obj, 'qr_user': qr_user})
+    # Generar imagen anotada base64 (si hay annotated)
+    try:
+        import base64
+        if annotated is not None:
+            ret, buf = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if ret:
+                image_annotated_base64 = base64.b64encode(buf.tobytes()).decode('ascii')
+            else:
+                annotated_error = (annotated_error or '') + '|image encode failed'
+        else:
+            annotated_error = (annotated_error or '') + '|no annotated image'
+    except Exception as e:
+        annotated_error = (annotated_error or '') + f'|base64 error: {e}'
+
+    resp = {'ok': True, 'boxes': boxes_out, 'qr': qr_obj, 'qr_user': qr_user, 'image_annotated_base64': image_annotated_base64}
+    try:
+        print(f"[DEBUG] detect_json response summary: boxes={len(boxes_out)}, qr_present={bool(qr_obj)}")
+    except Exception:
+        pass
+    if annotated_error:
+        resp['annotated_error'] = annotated_error
+    return jsonify(resp)
 
 
 if __name__ == '__main__':

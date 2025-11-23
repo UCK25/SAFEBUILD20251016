@@ -64,9 +64,11 @@ def reset_db():
     except Exception:
         pass
 
-    # Insert supervisor and guest accounts
+    # Insert supervisor and guest accounts with default QR codes
+    SUPERVISOR_QR = 'SUPERVISOR001'
+    GUEST_QR = 'GUEST001'
     try:
-        ok_sup = database.register_user('supervisor', 'supervisor123', None)
+        ok_sup = database.register_user('supervisor', 'supervisor123', SUPERVISOR_QR, role='supervisor')
         if ok_sup:
             print('Created user: supervisor')
         else:
@@ -75,7 +77,7 @@ def reset_db():
         print('register_user(supervisor) failed:', e)
 
     try:
-        ok_guest = database.register_user('guest', 'guest123', None)
+        ok_guest = database.register_user('guest', 'guest123', GUEST_QR, role='guest')
         if ok_guest:
             print('Created user: guest')
         else:
@@ -99,6 +101,20 @@ def reset_db():
         cur.execute("UPDATE users SET role='supervisor' WHERE username='supervisor'")
         # ensure admin exists with role admin (init_db should have created it)
         cur.execute("UPDATE users SET role='admin' WHERE username='admin'")
+        # ensure default QR codes assigned and unique for supervisor/guest
+        try:
+            # clear any other user that mistakenly has these QR codes
+            cur.execute("UPDATE users SET qr_code=NULL WHERE qr_code IN (?, ?) AND username NOT IN ('supervisor','guest')", (SUPERVISOR_QR, GUEST_QR))
+        except Exception:
+            pass
+        try:
+            cur.execute("UPDATE users SET qr_code=? WHERE username='supervisor'", (SUPERVISOR_QR,))
+        except Exception:
+            pass
+        try:
+            cur.execute("UPDATE users SET qr_code=? WHERE username='guest'", (GUEST_QR,))
+        except Exception:
+            pass
         conn.commit()
         conn.close()
     except Exception as e:

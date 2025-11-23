@@ -71,6 +71,27 @@ if model is None:
         model = None
 
 
+# SMTP helper: read common environment variable names and normalize
+def get_smtp_config():
+    """Return (host, port, user, password, from_addr).
+    Support multiple env var names for compatibility with hosting providers:
+    - SMTP_USER or SMTP_USERNAME
+    - SMTP_PASS or SMTP_PASSWORD
+    - SMTP_HOST, SMTP_PORT
+    - SMTP_FROM (optional, fallback to user or no-reply)
+    """
+    host = os.environ.get('SMTP_HOST') or os.environ.get('EMAIL_SMTP_HOST')
+    port_raw = os.environ.get('SMTP_PORT') or os.environ.get('EMAIL_SMTP_PORT')
+    try:
+        port = int(port_raw) if port_raw else 0
+    except Exception:
+        port = 0
+    user = os.environ.get('SMTP_USER') or os.environ.get('SMTP_USERNAME') or os.environ.get('EMAIL_SMTP_USER')
+    pwd = os.environ.get('SMTP_PASS') or os.environ.get('SMTP_PASSWORD') or os.environ.get('EMAIL_SMTP_PASSWORD')
+    from_addr = os.environ.get('SMTP_FROM') or os.environ.get('EMAIL_FROM') or user or 'no-reply@safebuild'
+    return host, port, user, pwd, from_addr
+
+
 def normalize_class_name(n):
     n = n.lower()
     mapping = {
@@ -781,23 +802,28 @@ def api_register_guest_public():
     # attempt to send email with credentials if SMTP configured
     sent = False
     try:
-        smtp_host = os.environ.get('SMTP_HOST')
-        smtp_port = int(os.environ.get('SMTP_PORT') or 0)
-        smtp_user = os.environ.get('SMTP_USER')
-        smtp_pass = os.environ.get('SMTP_PASS')
+        smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from = get_smtp_config()
         if smtp_host and smtp_port:
             import smtplib
             from email.message import EmailMessage
             msg = EmailMessage()
             msg['Subject'] = 'SafeBuild - Registro de cuenta'
-            msg['From'] = smtp_user or 'no-reply@safebuild'
+            msg['From'] = smtp_from
             msg['To'] = requested_email
             body = f"Su cuenta ha sido creada.\nUsuario: {requested_username}\nContraseña: {requested_password}\nQR: {qr_val}\n"
             msg.set_content(body)
             with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
-                if smtp_user and smtp_pass:
-                    s.starttls()
-                    s.login(smtp_user, smtp_pass)
+                try:
+                    # If credentials are provided, attempt secure connection and auth
+                    if smtp_user and smtp_pass:
+                        try:
+                            s.starttls()
+                        except Exception:
+                            pass
+                        s.login(smtp_user, smtp_pass)
+                except Exception:
+                    # if authentication fails, raise so outer except can handle
+                    raise
                 s.send_message(msg)
             sent = True
     except Exception:
@@ -845,10 +871,7 @@ def api_request_password_reset():
             return jsonify({'ok': False, 'error': 'reset_failed'}), 500
 
         # Send email with the temporary password. Do NOT return the temporary password in the HTTP response.
-        smtp_host = os.environ.get('SMTP_HOST')
-        smtp_port = int(os.environ.get('SMTP_PORT') or 0)
-        smtp_user = os.environ.get('SMTP_USER')
-        smtp_pass = os.environ.get('SMTP_PASS')
+        smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from = get_smtp_config()
         if not smtp_host or not smtp_port:
             # SMTP not configured: for security reasons do not reveal the temporary password in the response
             return jsonify({'ok': False, 'error': 'smtp_not_configured', 'message': 'Configure SMTP to send password reset emails'}), 500
@@ -858,16 +881,20 @@ def api_request_password_reset():
             from email.message import EmailMessage
             msg = EmailMessage()
             msg['Subject'] = 'SafeBuild - Recuperación de contraseña'
-            msg['From'] = smtp_user or 'no-reply@safebuild'
+            msg['From'] = smtp_from
             msg['To'] = email
             msg.set_content(f'Su contraseña temporal es: {temp}\nPor favor inicie sesión y cambie su contraseña.')
             with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
-                if smtp_user and smtp_pass:
-                    try:
-                        s.starttls()
-                    except Exception:
-                        pass
-                    s.login(smtp_user, smtp_pass)
+                try:
+                    if smtp_user and smtp_pass:
+                        try:
+                            s.starttls()
+                        except Exception:
+                            pass
+                        s.login(smtp_user, smtp_pass)
+                except Exception as e:
+                    # auth/starttls failed
+                    raise
                 s.send_message(msg)
             # success: report sent but do NOT include the password in the response
             return jsonify({'ok': True, 'sent': True})

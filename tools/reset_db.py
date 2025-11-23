@@ -14,7 +14,7 @@ import sqlite3
 ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, ROOT)
 
-from config import DB_PATH
+from config import DB_PATH, CAPTURES_DIR
 import database
 
 
@@ -26,6 +26,28 @@ def reset_db():
             os.remove(DB_PATH)
     except Exception as e:
         print("Could not remove DB file:", e)
+
+    # clear captures directory (logs and evidence) to return to fresh state
+    try:
+        if os.path.exists(CAPTURES_DIR):
+            print(f"Clearing captures directory: {CAPTURES_DIR}")
+            for fn in os.listdir(CAPTURES_DIR):
+                path = os.path.join(CAPTURES_DIR, fn)
+                try:
+                    if os.path.isfile(path) or os.path.islink(path):
+                        os.remove(path)
+                    elif os.path.isdir(path):
+                        import shutil
+                        shutil.rmtree(path)
+                except Exception as e:
+                    print(f"Could not remove {path}: {e}")
+        else:
+            try:
+                os.makedirs(CAPTURES_DIR, exist_ok=True)
+            except Exception:
+                pass
+    except Exception as e:
+        print('Error clearing captures dir:', e)
 
     # initialize DB (creates schema and default admin if none)
     try:
@@ -81,6 +103,25 @@ def reset_db():
         conn.close()
     except Exception as e:
         print('Post-insert role adjustment failed:', e)
+
+    # recreate empty log files
+    try:
+        qr_file = os.path.join(CAPTURES_DIR, 'qr_scans.json')
+        incidents_file = os.path.join(CAPTURES_DIR, 'incidents.json')
+        try:
+            with open(qr_file, 'w', encoding='utf-8') as f:
+                import json
+                json.dump([], f)
+        except Exception as e:
+            print('Could not write qr_scans.json:', e)
+        try:
+            with open(incidents_file, 'w', encoding='utf-8') as f:
+                import json
+                json.dump([], f)
+        except Exception as e:
+            print('Could not write incidents.json:', e)
+    except Exception:
+        pass
 
     print('Database reset complete.')
     return True

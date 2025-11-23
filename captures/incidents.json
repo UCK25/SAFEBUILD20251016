@@ -1,5 +1,55 @@
 [
   {
+    "id": 49,
+    "camera_name": "Camera_1",
+    "type": "Falta Casco",
+    "timestamp": "2025-11-22 21:47:04",
+    "description": "Falta Casco — Camera_1 2025-11-22 21:47:06\nUsuario: unknown",
+    "status": "open",
+    "evidence_path": "C:\\Users\\kenka\\Downloads\\SAFEBUILD20251016\\captures\\inc_20251122_214706.jpg",
+    "user_identified": null
+  },
+  {
+    "id": 48,
+    "camera_name": "Camera_1",
+    "type": "Falta Casco",
+    "timestamp": "2025-11-22 21:47:03",
+    "description": "Falta Casco — Camera_1 2025-11-22 21:47:03\nUsuario: admin",
+    "status": "open",
+    "evidence_path": "C:\\Users\\kenka\\Downloads\\SAFEBUILD20251016\\captures\\inc_20251122_214703.jpg",
+    "user_identified": "admin"
+  },
+  {
+    "id": 47,
+    "camera_name": "Camera_1",
+    "type": "Falta Chaleco",
+    "timestamp": "2025-11-22 21:46:59",
+    "description": "Falta Chaleco — Camera_1 2025-11-22 21:46:59\nUsuario: admin",
+    "status": "open",
+    "evidence_path": "C:\\Users\\kenka\\Downloads\\SAFEBUILD20251016\\captures\\inc_20251122_214659.jpg",
+    "user_identified": "admin"
+  },
+  {
+    "id": 46,
+    "camera_name": "Camera_1",
+    "type": "Falta Chaleco",
+    "timestamp": "2025-11-22 21:46:50",
+    "description": "Falta Chaleco — Camera_1 2025-11-22 21:46:51\nUsuario: admin",
+    "status": "open",
+    "evidence_path": "C:\\Users\\kenka\\Downloads\\SAFEBUILD20251016\\captures\\inc_20251122_214651.jpg",
+    "user_identified": "admin"
+  },
+  {
+    "id": 45,
+    "camera_name": "Camera_1",
+    "type": "Falta Casco",
+    "timestamp": "2025-11-22 21:43:45",
+    "description": "Falta Casco — Camera_1 2025-11-22 21:43:48\nUsuario: unknown",
+    "status": "open",
+    "evidence_path": "C:\\Users\\kenka\\Downloads\\SAFEBUILD20251016\\captures\\inc_20251122_214348.jpg",
+    "user_identified": null
+  },
+  {
     "id": 44,
     "camera_name": "Camera_1",
     "type": "Falta Casco",

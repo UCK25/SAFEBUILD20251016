@@ -1,4 +1,5 @@
 <!doctype html>
+<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
@@ -647,6 +648,9 @@
         }catch(e){ return ts; }
       }
 
+      // How many QR entries to keep visible in the side panel
+      const QR_DISPLAY_CAP = 99;
+
       // Top button handlers
       if(authTopBtn) authTopBtn.addEventListener('click', ()=>{ openModal(authModal); const mu = document.getElementById('modal_user'); if(mu) mu.focus(); });
       if(manageTopBtn) manageTopBtn.addEventListener('click', ()=>{ window.location = '/manage'; });
@@ -789,7 +793,10 @@
           const res = await fetch('/api/incidents', { credentials: 'include' });
           const data = await res.json();
           const log = document.getElementById('incidentsLog'); if(!log) return; log.innerHTML = '';
-          if(!data || !data.length){ log.innerHTML = '<div class="log-entry"><div class="log-time">No hay incidentes recientes.</div></div>'; return; }
+          if(!data || !data.length){ log.innerHTML = '<div class="log-entry"><div class="log-time">No hay incidentes recientes.</div></div>';
+            // actualizar contador de incidentes
+            try{ const countEl = document.getElementById('incidentCount'); if(countEl) countEl.textContent = '0'; }catch(e){}
+            return; }
           data.sort((a,b)=>{ try{ return new Date(b.timestamp) - new Date(a.timestamp); }catch(e){ return 0; } });
           data.forEach(i=>{
             const d = document.createElement('div'); d.className = 'log-entry';
@@ -818,6 +825,8 @@
             }catch(e){}
             log.appendChild(d);
           });
+          // actualizar contador de incidentes con la cantidad actual mostrada
+          try{ const countEl = document.getElementById('incidentCount'); if(countEl) countEl.textContent = String(log.children.length); }catch(e){}
         }catch(e){ console.warn('fetchIncidents error', e); }
       }
 
@@ -912,7 +921,7 @@
                     d.className = 'log-entry';
                     d.textContent = `Usuario: ${j.qr.user || j.qr.qr || 'unknown'} Tiempo: ${formatLocal(j.qr.ts)}`;
                     el.insertBefore(d, el.firstChild);
-                    while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+                    while(el.childNodes.length > QR_DISPLAY_CAP) el.removeChild(el.lastChild);
                     if(countEl) countEl.textContent = String(el.children.length);
                   }
                 } else {
@@ -1018,7 +1027,7 @@
                   // remove placeholder if present
                   if(el.children.length === 1 && el.children[0].textContent && el.children[0].textContent.indexOf('Esperando') !== -1){ el.innerHTML = ''; }
                   el.insertBefore(d, el.firstChild);
-                  while(el.childNodes.length > 10) el.removeChild(el.lastChild);
+                    while(el.childNodes.length > QR_DISPLAY_CAP) el.removeChild(el.lastChild);
                   const countEl = document.getElementById('qrCount'); if(countEl) countEl.textContent = String(el.children.length);
               }
               renderOverlayLocal();
@@ -1029,7 +1038,32 @@
       setInterval(pollLastQR, 2000);
       pollLastQR();
 
-      async function pollLastIncidents(){ try{ const r = await fetch('/api/last_incidents'); if(!r.ok) return; const j = await r.json(); if(j && j.ok && j.entry){ const entry = j.entry; if(entry.ts !== (window._lastIncidentTs||null)){ window._lastIncidentTs = entry.ts; const el = document.getElementById('incidentsLog'); if(el){ const d = document.createElement('div'); d.style.padding='8px'; d.style.borderBottom='1px solid var(--border)'; const hdr = document.createElement('div'); hdr.style.fontWeight='600'; hdr.textContent = entry.summary || (formatLocal(entry.ts) + ' — Incidente'); const det = document.createElement('div'); det.style.color='var(--text-secondary)'; det.style.fontSize='0.9em'; det.textContent = entry.detail || ((entry.type || 'Incidente') + ' - Usuario: ' + (entry.user_identified || entry.user || 'unknown')); d.appendChild(hdr); d.appendChild(det); el.insertBefore(d, el.firstChild); while(el.childNodes.length > 50) el.removeChild(el.lastChild); } } } }catch(e){} }
+      async function pollLastIncidents(){
+        try{
+          const r = await fetch('/api/last_incidents');
+          if(!r.ok) return;
+          const j = await r.json();
+          if(j && j.ok && j.entry){
+            const entry = j.entry;
+            if(entry.ts !== (window._lastIncidentTs||null)){
+              window._lastIncidentTs = entry.ts;
+              const el = document.getElementById('incidentsLog');
+              if(el){
+                const d = document.createElement('div');
+                d.style.padding='8px';
+                d.style.borderBottom='1px solid var(--border)';
+                const hdr = document.createElement('div'); hdr.style.fontWeight='600'; hdr.textContent = entry.summary || (formatLocal(entry.ts) + ' — Incidente');
+                const det = document.createElement('div'); det.style.color='var(--text-secondary)'; det.style.fontSize='0.9em'; det.textContent = entry.detail || ((entry.type || 'Incidente') + ' - Usuario: ' + (entry.user_identified || entry.user || 'unknown'));
+                d.appendChild(hdr); d.appendChild(det);
+                el.insertBefore(d, el.firstChild);
+                while(el.childNodes.length > 50) el.removeChild(el.lastChild);
+                // actualizar contador de incidentes
+                try{ const countEl = document.getElementById('incidentCount'); if(countEl) countEl.textContent = String(el.children.length); }catch(e){}
+              }
+            }
+          }
+        }catch(e){ }
+      }
       setInterval(pollLastIncidents, 2000); pollLastIncidents();
 
     })();

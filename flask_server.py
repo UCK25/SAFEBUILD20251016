@@ -92,6 +92,52 @@ def get_smtp_config():
     return host, port, user, pwd, from_addr
 
 
+def _send_email_via_smtp(msg, host, port, user, pwd):
+    """Attempt to send EmailMessage `msg` using provided SMTP settings.
+    Tries SSL on 465, otherwise tries STARTTLS then login. Returns (True, None) on success,
+    or (False, short_error_message) on failure. Logs non-secret diagnostics to stdout.
+    """
+    import smtplib, traceback
+    try:
+        # prefer SMTPS for port 465
+        if port == 465:
+            print(f"[SMTP] connecting using SSL to {host}:{port}")
+            with smtplib.SMTP_SSL(host, port, timeout=15) as s:
+                if user and pwd:
+                    s.login(user, pwd)
+                s.send_message(msg)
+        else:
+            print(f"[SMTP] connecting to {host}:{port} (plain then STARTTLS)")
+            with smtplib.SMTP(host, port, timeout=15) as s:
+                try:
+                    s.ehlo()
+                except Exception:
+                    pass
+                # attempt STARTTLS where supported; some servers accept it, some don't
+                started_tls = False
+                try:
+                    s.starttls()
+                    started_tls = True
+                except Exception as e:
+                    print(f"[SMTP] STARTTLS failed or not supported: {e}")
+                try:
+                    if user and pwd:
+                        s.login(user, pwd)
+                except Exception as e:
+                    # login failed — surface a concise error (do not log credentials)
+                    raise
+                s.send_message(msg)
+        print("[SMTP] message sent successfully")
+        return True, None
+    except Exception as e:
+        short = f"{type(e).__name__}: {str(e)}"
+        # print full traceback to logs for debugging (do not print secrets)
+        print('[SMTP] send failed:', short)
+        tb = traceback.format_exc()
+        print(tb)
+        return False, short
+
+
 def normalize_class_name(n):
     n = n.lower()
     mapping = {
@@ -812,20 +858,10 @@ def api_register_guest_public():
             msg['To'] = requested_email
             body = f"Su cuenta ha sido creada.\nUsuario: {requested_username}\nContraseña: {requested_password}\nQR: {qr_val}\n"
             msg.set_content(body)
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
-                try:
-                    # If credentials are provided, attempt secure connection and auth
-                    if smtp_user and smtp_pass:
-                        try:
-                            s.starttls()
-                        except Exception:
-                            pass
-                        s.login(smtp_user, smtp_pass)
-                except Exception:
-                    # if authentication fails, raise so outer except can handle
-                    raise
-                s.send_message(msg)
-            sent = True
+            ok, detail = _send_email_via_smtp(msg, smtp_host, smtp_port, smtp_user, smtp_pass)
+            sent = bool(ok)
+            if not ok:
+                print(f"[DEBUG] SMTP send returned error: {detail}")
     except Exception:
         sent = False
 
@@ -877,30 +913,23 @@ def api_request_password_reset():
             return jsonify({'ok': False, 'error': 'smtp_not_configured', 'message': 'Configure SMTP to send password reset emails'}), 500
 
         try:
-            import smtplib
             from email.message import EmailMessage
             msg = EmailMessage()
             msg['Subject'] = 'SafeBuild - Recuperación de contraseña'
             msg['From'] = smtp_from
             msg['To'] = email
             msg.set_content(f'Su contraseña temporal es: {temp}\nPor favor inicie sesión y cambie su contraseña.')
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
-                try:
-                    if smtp_user and smtp_pass:
-                        try:
-                            s.starttls()
-                        except Exception:
-                            pass
-                        s.login(smtp_user, smtp_pass)
-                except Exception as e:
-                    # auth/starttls failed
-                    raise
-                s.send_message(msg)
-            # success: report sent but do NOT include the password in the response
-            return jsonify({'ok': True, 'sent': True})
+            ok, detail = _send_email_via_smtp(msg, smtp_host, smtp_port, smtp_user, smtp_pass)
+            if ok:
+                return jsonify({'ok': True, 'sent': True})
+            # log the short detail and return a generic error
+            print(f"[DEBUG] password reset email failed: {detail}")
+            return jsonify({'ok': False, 'error': 'email_failed', 'detail': detail}), 500
         except Exception as e:
             # For security, do not return the temporary password even on error
-            return jsonify({'ok': False, 'error': 'email_failed', 'detail': str(e)}), 500
+            short = f"{type(e).__name__}: {str(e)}"
+            print(f"[DEBUG] unexpected error preparing reset email: {short}")
+            return jsonify({'ok': False, 'error': 'email_failed', 'detail': short}), 500
     except Exception as e:
         return jsonify({'ok': False, 'error': 'exception', 'detail': str(e)}), 500
 
